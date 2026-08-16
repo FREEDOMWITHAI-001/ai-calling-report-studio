@@ -1,0 +1,280 @@
+===============================================================================
+ COACHEASILY REPORT STUDIO - PROJECT NOTES
+ Location : D:\FWAI\FWAI-Internal\AI Calling report System
+ Built    : 16 Aug 2026
+ Status   : WORKING. Backend + frontend + database all live and validated.
+===============================================================================
+
+-------------------------------------------------------------------------------
+ 1. HOW TO START THE APP
+-------------------------------------------------------------------------------
+Open PowerShell in:  D:\FWAI\FWAI-Internal\AI Calling report System
+
+  .\run.ps1 -Prod     -> everything on http://127.0.0.1:8000   (recommended)
+  .\run.ps1           -> API on :8000 + hot-reload UI on http://127.0.0.1:5173
+
+IMPORTANT: port 5173 only exists while "npm run dev" (Vite) is running.
+If you get ERR_CONNECTION_REFUSED, the server is simply not running - start it.
+
+First time on a new machine:
+  .\setup.ps1         -> creates venv, installs Python + npm packages, makes tables
+
+Check it is alive:
+  http://127.0.0.1:8000/api/health
+  http://127.0.0.1:8000/docs          (interactive API docs)
+
+Server logs (when started in background):
+  backend\data\server.log
+  backend\data\server.err
+
+-------------------------------------------------------------------------------
+ 2. DATABASE
+-------------------------------------------------------------------------------
+Dev PostgreSQL provided by the team. The real host, user and password are NOT
+in this file - they live only in backend\.env, which is gitignored. Ask the team
+for the values, or copy backend\.env.example and fill them in.
+  host     <see backend\.env>
+  port     5432
+  database devdb
+  user     <see backend\.env>
+  password <see backend\.env>
+  schema   ai_report        <- this app's tables live here ONLY
+
+Why a separate schema: devdb's "public" schema already has 217 tables from other
+projects. Keeping this app in "ai_report" means zero collision risk.
+
+Config file:  backend\.env
+  DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:5432/devdb
+  DB_SCHEMA=ai_report
+  (the @ in the password must be written as %40 inside the URL)
+
+Offline mode: delete or comment out DATABASE_URL and the app automatically uses
+a local SQLite file at backend\data\app.db - no server needed.
+
+Currently loaded (English / CBA X):
+  registrations   12,856
+  ai_calls        41,810
+  sales              549
+  attendance      15,738
+  webinar_daily      999
+  persons         21,319   (deduplicated humans across all files)
+  bots                18
+
+-------------------------------------------------------------------------------
+ 3. WHAT THE APP DOES
+-------------------------------------------------------------------------------
+UPLOAD DATA
+  Drop in any CSV or XLSX. The app:
+    - lists every sheet in the workbook
+    - previews the first rows
+    - auto-detects the data type (registration / AI calling / sales / attendance
+      / platform daily / custom) and the column mapping
+    - lets you correct both before loading
+    - saves the mapping as a reusable template keyed on the file's header
+      signature, so the same export is one click next time
+  Everything is logged in raw_uploads with rows / inserted / skipped / status /
+  first error. Re-uploading the SAME file inserts nothing (each row carries a
+  content hash), but a genuine repeat registration is still stored.
+
+DATA
+  Browse the normalized tables the reports are built from.
+
+REPORTS
+  - date range, plus presets (last 7 / 14 / 30 days, this month)
+  - filter by language/segment and by specific bot names  (both honoured NOW)
+  - tick PDF / Excel / PowerPoint - generates all chosen formats in one action
+  - "Preview numbers" shows the entire report on screen before exporting
+  - batch generation for several windows at once (POST /api/reports/batch)
+  - every generated file is stored with its metadata and can be re-downloaded
+    without recomputing
+
+METHODOLOGY (settings page)
+  Every constant is editable and saved as a named config, and is stamped into
+  each generated report:
+    sale value (Rs 6,999), cost per minute (Rs 5.10), connect threshold (15s),
+    billing rounding (ceil_minute / exact_second), baseline mode, uplift mode
+    (weighted / simple), lead-age band edges, team/test patterns, bot role
+    patterns, attendance match mode.
+  Bot roles (signup / day_of / other) can be changed per bot.
+
+-------------------------------------------------------------------------------
+ 4. VALIDATION - HOW ACCURATE IT IS
+-------------------------------------------------------------------------------
+Run:  cd backend
+      .\.venv\Scripts\python.exe scripts\validate_against_reference.py
+
+Against the PUBLISHED 17 Jul - 14 Aug 2026 report:
+
+  metric              published      engine     diff
+  ---------------------------------------------------
+  Registrants             2,624       2,626    +0.1%
+  Connected people        1,248       1,248     0.0%
+  Baseline people         1,376       1,378    +0.1%
+  Showed                  1,293       1,282    -0.9%
+  Buyers                    111         111     0.0%
+  Calls placed            7,268       7,287    +0.3%
+  Calls connected         1,888       1,889    +0.1%
+  Billed minutes          4,555       4,558    +0.1%
+  Talk cost            Rs 23,230   Rs 23,246   +0.1%
+  Extra sales              48.6        48.6    +0.1%
+  Revenue with AI     Rs 776,889  Rs 776,889    0.0%
+  AI added            Rs 340,260  Rs 340,479   +0.1%
+  ROI                     14.6x       14.6x    +0.3%
+
+Per-bot table matches almost exactly:
+  published 1,145 / 507 / 404 / 1,376 registrants, 75 / 46 / 42 / 32 buyers
+  engine    1,145 / 507 / 404 / 1,378 registrants, 75 / 46 / 42 / 32 buyers
+
+ALWAYS re-run this script after touching backend\app\metrics\engine.py.
+
+-------------------------------------------------------------------------------
+ 5. HOW THE REPORT IS CALCULATED
+-------------------------------------------------------------------------------
+ 1. Registrants = rows in the window, team/test rows removed, deduplicated to
+    people (phone -> email -> name).
+ 2. Connected  = a signup or day-of bot held a conversation LONGER than 15s.
+    Signup / day-of / both groups overlap by design.
+    Baseline    = everyone the bots never got talking to (never dialled +
+                  dialled but no answer, merged).
+ 3. Show-up    = per-person match against the attendance data.
+ 4. Buyers     = per-person match against sales; ONE full Rs 6,999 sale per
+    person (lock + balance collapse to one); rows dated before the person
+    registered are dropped; zero-amount rows are dropped.
+ 5. Extra sales credited to AI = registrants split into lead-age bands
+    (0-2, 3-6, 7-9, 10-13, 14+ days). Inside each band connected leads are
+    compared ONLY with baseline leads of the same age; the band's buy-rate gap
+    is multiplied by that band's connected count; the bands are summed.
+    This is like-for-like weighting, not a raw comparison of two different mixes.
+ 6. Talk cost = in-scope bots only, calls with talk time only, each call rounded
+    UP to the next whole minute (billing is per minute) x Rs 5.10.
+ 7. Revenue with AI = buyers x Rs 6,999
+    AI added         = extra sales x Rs 6,999
+    Revenue without  = with - added
+    ROI              = added / talk cost
+    Significance     = two-proportion z-test (connected vs baseline).
+
+Each report also carries an audit block: rows in/out, repeats and team rows
+removed, sale rows dropped and why, call match rate, exact vs billed minutes,
+and the observational caveat.
+
+-------------------------------------------------------------------------------
+ 6. DATA MODEL
+-------------------------------------------------------------------------------
+  clients, events, bots        who / which workshop / which bot (role)
+  persons                      one row per human, resolved across every file
+  registrations                sign-ups: name, email, phone, date/time, UTM,
+                               language, program
+  ai_calls                     one row per call: bot, contact, status, outcome,
+                               sentiment, interest, duration, turns, timestamps,
+                               recording url, call sid
+  sales                        amount, date, payment id/status/type, product
+  attendance                   zoom/webinar attendance + minutes in session
+  webinar_daily                platform's own daily counts (reconciliation only)
+  generic_datasets/records     any new data type - stored as JSON, still linked
+                               to a person
+  raw_uploads                  upload audit log
+  mapping_templates            remembered column mappings
+  methodology_configs          saved calculation settings
+  report_runs                  every generated report + file paths
+
+Join key across datasets: phone number normalized to the last 10 digits.
+Email is the second key, name the third - and name is ONLY trusted when the row
+has no usable phone (which is exactly the attendance export's case: "Not Found"
+numbers and platform alias emails). This rule matters: trusting name when a
+phone is present merged different people who share a common name and cost ~100
+registrants in an early run.
+
+All tables carry created_at / updated_at.
+
+-------------------------------------------------------------------------------
+ 7. USEFUL COMMANDS  (run from backend\ using .\.venv\Scripts\python.exe)
+-------------------------------------------------------------------------------
+  scripts\load_reference_data.py --reset
+      Wipes and reloads all reference data from _reference\raw  (~2.5 min)
+
+  scripts\validate_against_reference.py
+      Engine vs the two published reports
+
+  scripts\generate_sample_report.py 2026-07-17 2026-08-14
+      Writes PDF + XLSX + PPTX into backend\data\reports
+
+-------------------------------------------------------------------------------
+ 8. FILE MAP
+-------------------------------------------------------------------------------
+  backend\app\config.py            methodology defaults, paths, .env loading
+  backend\app\db.py  models.py     engine + the normalized schema
+  backend\app\ingest\              readers (CSV/XLSX streaming), type + column
+                                   detection, person resolution, loaders
+  backend\app\metrics\engine.py    THE CALCULATION - edit carefully, re-validate
+  backend\app\metrics\stats.py     z-test, rates, deltas
+  backend\app\render\excel.py      Overview tab + detail tab + numbers + bot cost
+  backend\app\render\pdf.py        print-ready landscape PDF
+  backend\app\render\pptx_deck.py  stakeholder deck with charts
+  backend\app\render\style.py      shared colours, formatting, method text
+  backend\app\routers\             uploads / data / reports  (FastAPI)
+  backend\scripts\                 load, validate, generate
+  frontend\src\pages\              Dashboard, Upload, Data, Reports, Methodology
+  _reference\                      the 2 sample reports + the 3 raw source files
+  README.md                        full documentation
+  RESUME-PROMPT.md                 prompt to paste into Claude Code next session
+
+-------------------------------------------------------------------------------
+ 9. SOURCE DATA THAT WAS USED
+-------------------------------------------------------------------------------
+Downloaded from the shared Drive folder into _reference\raw:
+  Purushottam_Hambarde_PH__Scalex_3.xlsx   (42 sheets, 11 MB)
+      sheets used: L0 English Leads data / L1 English - Full and lock /
+                   L1 English - Balance / English Number Fetch /
+                   English Webinar data
+      also contains Hinglish, Marathi and SuperWomen equivalents (not yet loaded)
+  call-logs-2026-08-14.csv                 (20 MB, 33,380 real rows - transcripts
+      contain embedded newlines, so it is NOT one row per line)
+      columns: Bot Name, Contact Name, Phone, Email, Status, Outcome,
+               Goal Outcome, Interest Level, Sentiment, Lead Temperature,
+               Duration (s), Turns, Red Flags, Summary, Transcript,
+               Recording URL, Call SID, Started At, Ended At, Created At
+  Attendee_Report_Masterdata_English.xlsx  DELIBERATELY NOT LOADED - the
+      reference report rejected it (matches only ~7% of registrants)
+
+Bots that matter:
+  "Sneha - Instant  Confirmation ENGLISH"  -> signup bot
+  "Sneha - Session Today ENGLISH"          -> day-of bot
+Call status values: busy / no_answer / completed / failed / error.
+
+-------------------------------------------------------------------------------
+10. KNOWN GAPS  (full list in README.md)
+-------------------------------------------------------------------------------
+ 1. BIGGEST ONE: the supplied call log only covers ~17 Jul onward. The
+    26 Jun - 17 Jul 2026 report therefore cannot be fully reproduced -
+    registrants (2,047 vs 2,056) and show-up (1,018 vs 1,018) match, but talk
+    cost lands at Rs 3,172 instead of Rs 12,337 because ~2,300 calls and the
+    entire day-of bot are missing from that period.
+    FIX: upload the older call log via the Upload page. No code change needed.
+ 2. Report 2's methodology is the default (not-connected baseline + lead-age
+    weighting). Report 1's simpler variant is available by switching
+    baseline_mode / uplift_mode under Methodology.
+ 3. Report 2's Overview tab mentions a weighted-band table that is not actually
+    on that tab. This app renders it, which is what the method text describes.
+ 4. No authentication (as requested). Binds to 127.0.0.1 - anyone who can reach
+    the port can read uploaded PII.
+ 5. Background work uses FastAPI background tasks, not Celery. A 20 MB call log
+    ingests in ~45s and a report renders in under a second, so a broker is not
+    yet worth it. Both entry points are isolated functions, so moving to Celery
+    later is a drop-in change.
+ 6. Nothing is deleted automatically. Uploads: backend\data\uploads.
+    Reports: backend\data\reports. Both have DELETE endpoints.
+ 7. The UI was never visually confirmed in a browser during the build - the
+    Chrome extension did not respond. The build compiles and the API serves it.
+
+-------------------------------------------------------------------------------
+11. OPEN QUESTIONS FOR YOU
+-------------------------------------------------------------------------------
+ 1. Do you have the older call log (26 Jun - 17 Jul 2026)?
+ 2. Load Hinglish / Marathi / SuperWomen data now? Same workbook, same screen.
+ 3. Retention: keep uploads and reports forever, or auto-clean after N days?
+ 4. Stays on localhost, or does it need login before others use it?
+ 5. Should part payments (Rs 999 lock, Rs 6,000 balance) ever count at face
+    value instead of one full Rs 6,999 sale per person? Today it follows the
+    reference reports exactly.
+
+===============================================================================
