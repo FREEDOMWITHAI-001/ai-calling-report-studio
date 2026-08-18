@@ -333,9 +333,17 @@ class MappingTemplate(Base, TimestampMixin):
 
 
 class MethodologyConfig(Base, TimestampMixin):
+    """How a client wants the numbers computed.
+
+    Scoped to a client, like their uploads, formats and bots: one client billing
+    exact talk seconds must not change what another client's report says. A row
+    with no client is a shared starting point.
+    """
+
     __tablename__ = "methodology_configs"
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(160), unique=True)
+    client_id: Mapped[int | None] = mapped_column(ForeignKey(fk("clients.id")), index=True)
+    name: Mapped[str] = mapped_column(String(160))
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     params: Mapped[dict] = mapped_column(JSON)
     description: Mapped[str | None] = mapped_column(Text)

@@ -59,9 +59,9 @@ class Template:
     # webinars gets two reports and two ROIs in one workbook.
     group_by: str | None = None
     overview_section: str | None = None
-    # Methodology this format assumes, where the client's own workbook settled a
-    # question differently from the default. DVA bills exact talk seconds; the
-    # default bills whole minutes. Anything the caller passes still wins.
+    # Methodology a format assumes, for formats defined in the database via
+    # `spec`. Built-ins leave this empty: how a client bills is that client's
+    # setting, not a fact about a layout, and belongs in their methodology.
     params: dict = field(default_factory=dict)
 
 
@@ -204,9 +204,6 @@ DVA_GENERAL = Template(
     formats=["xlsx"],
     group_by="program",
     overview_section="programme_overview",
-    # DVA's workbook charges actual talk seconds, not rounded-up minutes. On
-    # 12-18 Aug that is the difference between ₹6,110 and ₹3,375 for HBL.
-    params={"billing_rounding": "exact_second"},
     sections=[SectionRef("programme_report")],
     brand=Brand(
         accent="2E6DA4",

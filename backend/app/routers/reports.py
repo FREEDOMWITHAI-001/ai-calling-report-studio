@@ -53,9 +53,20 @@ def _resolve_params(db: Session, body: ReportRequest, client_id: int | None = No
     config = None
     if body.methodology_id:
         config = db.get(MethodologyConfig, body.methodology_id)
+    if config is None and client_id is not None:
+        # This client's own answer wins over the shared one.
+        config = db.execute(
+            select(MethodologyConfig).where(
+                MethodologyConfig.client_id == client_id,
+                MethodologyConfig.is_default.is_(True),
+            )
+        ).scalars().first()
     if config is None:
         config = db.execute(
-            select(MethodologyConfig).where(MethodologyConfig.is_default.is_(True))
+            select(MethodologyConfig).where(
+                MethodologyConfig.client_id.is_(None),
+                MethodologyConfig.is_default.is_(True),
+            )
         ).scalars().first()
     if config:
         params.update(config.params or {})
@@ -92,7 +103,7 @@ def compose_report(body: ReportRequest, db: Session = Depends(get_db)):
         date_from=body.date_from,
         date_to=body.date_to,
         template=body.template,
-        params=_resolve_params(db, body),
+        params=_resolve_params(db, body, client.id),
         language=body.language,
         program=body.program,
         title=body.title,

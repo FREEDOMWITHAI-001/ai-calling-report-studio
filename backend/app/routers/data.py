@@ -141,8 +141,13 @@ def update_bot(bot_id: int, body: BotUpdate,
 
 
 @router.get("/methodologies", response_model=list[MethodologyOut])
-def methodologies(db: Session = Depends(get_db)):
-    return db.execute(select(MethodologyConfig).order_by(MethodologyConfig.id)).scalars().all()
+def methodologies(client: Client = Depends(require_client), db: Session = Depends(get_db)):
+    """This client's configs, plus any shared one it can start from."""
+    return db.execute(
+        select(MethodologyConfig).where(
+            (MethodologyConfig.client_id == client.id) | MethodologyConfig.client_id.is_(None)
+        ).order_by(MethodologyConfig.client_id.is_(None), MethodologyConfig.id)
+    ).scalars().all()
 
 
 @router.get("/methodologies/defaults")
@@ -151,15 +156,21 @@ def methodology_defaults():
 
 
 @router.post("/methodologies", response_model=MethodologyOut)
-def create_methodology(body: MethodologyIn, db: Session = Depends(get_db)):
+def create_methodology(body: MethodologyIn, client: Client = Depends(require_client),
+                       db: Session = Depends(get_db)):
     existing = db.execute(
-        select(MethodologyConfig).where(MethodologyConfig.name == body.name)
+        select(MethodologyConfig).where(
+            MethodologyConfig.client_id == client.id, MethodologyConfig.name == body.name
+        )
     ).scalar_one_or_none()
-    config = existing or MethodologyConfig(name=body.name)
+    config = existing or MethodologyConfig(name=body.name, client_id=client.id)
     config.params = {**DEFAULT_METHODOLOGY, **body.params}
     config.description = body.description
     if body.is_default:
-        for other in db.execute(select(MethodologyConfig)).scalars():
+        # Only this client's other configs lose the flag.
+        for other in db.execute(
+            select(MethodologyConfig).where(MethodologyConfig.client_id == client.id)
+        ).scalars():
             other.is_default = False
         config.is_default = True
     db.add(config)
