@@ -50,6 +50,11 @@ export default function SettingsPage() {
     } catch (e) { setError(e.message) }
   }
 
+  const setBotProgram = async (bot, program) => {
+    await api.updateBot(bot.id, { program })
+    setBots((rows) => rows.map((b) => (b.id === bot.id ? { ...b, program } : b)))
+  }
+
   const setBotRole = async (bot, role) => {
     await api.updateBot(bot.id, { role })
     setBots(await api.bots())
@@ -115,12 +120,15 @@ export default function SettingsPage() {
           <Typography variant="caption" color="text.secondary">
             Signup and day-of bots define "connected" and the billed talk cost. Everything else is ignored by the
             impact calculation unless you pick it explicitly when generating a report.
+            {' '}Set <strong>Webinar</strong> only if this client runs more than one at a time: it charges each
+            bot&apos;s talk time to that webinar&apos;s ROI instead of sharing it across both. Leave it blank otherwise.
           </Typography>
           <Table size="small" sx={{ mt: 2 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Bot</TableCell>
                 <TableCell>Language</TableCell>
+                <TableCell width={170}>Webinar</TableCell>
                 <TableCell width={200}>Role</TableCell>
               </TableRow>
             </TableHead>
@@ -129,6 +137,18 @@ export default function SettingsPage() {
                 <TableRow key={bot.id}>
                   <TableCell>{bot.name}</TableCell>
                   <TableCell>{bot.language || '—'}</TableCell>
+                  <TableCell>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      placeholder="e.g. HBL"
+                      defaultValue={bot.program || ''}
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== (bot.program || '')) setBotProgram(bot, next)
+                      }}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Select size="small" fullWidth value={bot.role} onChange={(e) => setBotRole(bot, e.target.value)}>
                       <MenuItem value="signup">signup</MenuItem>

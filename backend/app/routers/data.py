@@ -128,6 +128,10 @@ def update_bot(bot_id: int, body: BotUpdate,
     bot = owned(db.get(Bot, bot_id), client.id, "Bot")
     if body.role is not None:
         bot.role = body.role
+    if body.program is not None:
+        # A client running two webinars tags each bot with the one it works
+        # for, so its talk time is charged to that webinar's ROI alone.
+        bot.program = body.program.strip() or None
     if body.active is not None:
         bot.active = body.active
     if body.language is not None:

@@ -46,6 +46,7 @@ class BotOut(BaseModel):
     id: int
     name: str
     role: str
+    program: str | None = None
     language: str | None = None
     active: bool = True
 
@@ -55,6 +56,8 @@ class BotOut(BaseModel):
 
 class BotUpdate(BaseModel):
     role: str | None = None
+    # "" clears the programme; None leaves it alone.
+    program: str | None = None
     active: bool | None = None
     language: str | None = None
 
