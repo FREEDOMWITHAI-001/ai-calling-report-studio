@@ -74,8 +74,16 @@ class Sheet:
         self.ws.freeze_panes = "A2"
 
 
+def _head_fill(brand: dict) -> str:
+    return brand.get("head_fill") or brand.get("band", "F7F6FC")
+
+
+def _head_ink(brand: dict) -> str:
+    return brand.get("head_ink") or brand.get("muted", "6B6683")
+
+
 def _title(sheet: Sheet, text: str, subtitle: str | None = None) -> None:
-    sheet.write(1, text, bold=True, size=14, color=sheet.brand.get("ink"))
+    sheet.write(1, text, bold=True, size=13, color=sheet.brand.get("accent"))
     sheet.row += 1
     if subtitle:
         sheet.write(1, subtitle, size=9, color=sheet.brand.get("muted"), wrap=True)
@@ -112,8 +120,8 @@ def _render_kpi(sheet: Sheet, block: dict) -> None:
 def _render_funnel(sheet: Sheet, block: dict) -> None:
     _title(sheet, block.get("title") or "", block.get("subtitle"))
     for col, label in enumerate(("Stage", "Count", "Rate"), start=1):
-        sheet.write(col, label, bold=True, size=9, color=sheet.brand.get("muted"),
-                    fill=sheet.brand.get("band"), border=True,
+        sheet.write(col, label, bold=True, size=9, color=_head_ink(sheet.brand),
+                    fill=_head_fill(sheet.brand), border=True,
                     align="right" if col > 1 else "left")
     sheet.row += 1
     for stage in block["stages"]:
@@ -132,7 +140,7 @@ def _render_table(sheet: Sheet, block: dict) -> None:
     columns = block["columns"]
     for index, column in enumerate(columns, start=1):
         sheet.write(index, column["label"], bold=True, size=9,
-                    color=sheet.brand.get("muted"), fill=sheet.brand.get("band"),
+                    color=_head_ink(sheet.brand), fill=_head_fill(sheet.brand),
                     border=True, align=column.get("align", "left"))
     sheet.row += 1
 

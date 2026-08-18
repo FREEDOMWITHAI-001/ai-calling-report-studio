@@ -879,6 +879,13 @@ def _money(value) -> str:
     return f"₹{value:,.0f}" if isinstance(value, (int, float)) else "—"
 
 
+def _rate(value) -> str:
+    """A per-minute rate keeps its paise; ₹5.10 must not print as ₹5."""
+    if not isinstance(value, (int, float)):
+        return "—"
+    return f"₹{value:,.0f}" if float(value).is_integer() else f"₹{value:,.2f}"
+
+
 def _round1(value) -> str:
     return f"{value:,.1f}" if isinstance(value, (int, float)) else "—"
 
@@ -1062,7 +1069,7 @@ def _coacheasily_overview(cohort: Cohort, config: dict) -> list[Block]:
     })
     blocks += [
         table(
-            f"WHAT THE CALLS COST  ({_money(rate)} per minute)",
+            f"WHAT THE CALLS COST  ({_rate(rate)} per minute)",
             [
                 Col("bot", "Bot"),
                 Col("calls", "Calls with talk time", "int", "right"),
@@ -1133,6 +1140,12 @@ def _method_items(cohort: Cohort, result: dict) -> list[Item]:
              f"{_int_str(head.get('buyers'))} buyers among the registrants in this window"
              + (f", counted against {_int_str(audit.get('sale_rows_in_window'))} sale rows."
                 if audit.get("sale_rows_in_window") else "."), "text"),
+        Item("Registrant base — how the raw rows become the number used",
+             f"{_int_str(audit.get('registration_rows'))} registration rows read; "
+             f"{_int_str(audit.get('team_registration_rows'))} internal/test rows dropped; "
+             f"{_int_str(audit.get('repeat_registration_rows'))} repeat sign-ups collapsed to "
+             f"one person each; leaving {_int_str(audit.get('unique_registrants'))} unique "
+             "registrants. Every rate below divides by that last number.", "text"),
         Item("Show-up",
              f"Per-person match against the attendance data: "
              f"{_int_str(groups.get('total', {}).get('showed'))} of "
@@ -1152,7 +1165,7 @@ def _method_items(cohort: Cohort, result: dict) -> list[Item]:
              "Within each band the connected buy rate is compared with the not-connected "
              "buy rate, and the gap times the connected count is the credit for that band.",
              "text"),
-        Item(f"Cost — the {_money(calls.get('cost_per_minute'))} per minute check",
+        Item(f"Cost — the {_rate(calls.get('cost_per_minute'))} per minute check",
              f"{_int_str(calls.get('billed_minutes'))} billed minutes "
              f"({_round1((calls.get('talk_seconds') or 0) / 60)} actual), charged in whole "
              f"minutes, giving {_money(calls.get('talk_cost'))}.", "text"),
@@ -1182,7 +1195,7 @@ def _coacheasily_report(cohort: Cohort, config: dict) -> list[Block]:
             Item("Extra sales credited to AI (weighted, like-for-like)",
                  head.get("extra_sales"), "number"),
             Item("Sale value", head.get("sale_value"), "money"),
-            Item(f"Talk-minutes × {_money(calls.get('cost_per_minute'))}  (Signup+Day-of)",
+            Item(f"Talk-minutes × {_rate(calls.get('cost_per_minute'))}  (Signup+Day-of)",
                  head.get("talk_cost"), "money"),
             Item("ROI (return multiple)", head.get("roi"), "multiple", tone="accent"),
         ]),

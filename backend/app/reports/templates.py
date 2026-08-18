@@ -25,6 +25,10 @@ class Brand:
     positive: str = "0E8F6A"
     negative: str = "CF2740"
     baseline: str = "FBEED2"
+    # Column headers. Kept separate from `band`/`muted` so a format can give
+    # them a strong fill without repainting note text, which shares `muted`.
+    head_fill: str | None = None      # falls back to `band`
+    head_ink: str | None = None       # falls back to `muted`
     logo_path: str | None = None
     footer: str | None = None
 
@@ -158,6 +162,18 @@ COACHEASILY_GENERAL = Template(
     cover_title=None,
     cover=False,
     formats=["xlsx"],
+    # Palette lifted from the client's own workbook so a generated report and a
+    # hand-built one sit side by side without looking like different documents.
+    brand=Brand(
+        accent="2E6DA4",     # section headings
+        ink="1F2933",
+        muted="5A6B7C",
+        band="D9E1F2",       # total rows
+        baseline="FFF2CC",   # the baseline row
+        positive="1E7A44",
+        head_fill="D9E1F2",  # column headers
+        head_ink="1F3864",
+    ),
     sections=[
         SectionRef("coacheasily_overview", title="Overview"),
         SectionRef("coacheasily_report", title="CBA X report"),
