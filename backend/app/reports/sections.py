@@ -1390,7 +1390,7 @@ def _programme_overview(cohort: Cohort, config: dict) -> list[Block]:
         "roi": (totals["added"] / totals["cost"]) if totals["cost"] else None,
     })
 
-    return [
+    blocks = [
         table(
             "REVENUE WITH AI CALLING vs WITHOUT",
             [
@@ -1405,11 +1405,28 @@ def _programme_overview(cohort: Cohort, config: dict) -> list[Block]:
             emphasis={"Total": "total"},
         ),
         text(
-            "Each webinar is costed against its own two bots only, so the ROI on a row is "
-            "that webinar's alone. The Total re-derives from the summed money rather than "
+            "Each webinar is costed against its own bots only, so the ROI on a row is that "
+            "webinar's alone. The Total re-derives from the summed money rather than "
             "averaging the ROIs above, which would belong to neither webinar."
         ),
     ]
+
+    # Someone will add the per-webinar lead counts and expect the client total.
+    # They will not match whenever a person signed up for more than one, so say
+    # by how many rather than leaving the arithmetic looking broken.
+    seen: dict[int, int] = {}
+    for _, sub in programmes:
+        for pid in getattr(sub, "registrants", set()) or set():
+            seen[pid] = seen.get(pid, 0) + 1
+    shared = sum(1 for n in seen.values() if n > 1)
+    if shared:
+        blocks.append(text(
+            f"{shared:,} of these people registered for more than one webinar, so the lead "
+            f"counts overlap: adding them gives {sum(seen.values()):,} where {len(seen):,} "
+            "distinct people are involved. Revenue does not double-count — each sale is "
+            "credited to one webinar."
+        ))
+    return blocks
 
 
 @section("programme_report", "Programme report",
