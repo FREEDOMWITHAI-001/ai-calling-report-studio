@@ -27,6 +27,7 @@ export default function UploadPage() {
   const [mapping, setMapping] = useState({})
   const [options, setOptions] = useState({ language: '', program: '', product: '' })
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(null)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
 
@@ -55,14 +56,14 @@ export default function UploadPage() {
   const onFile = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
-    setBusy(true); setError(null); setPreview(null); setUpload(null)
+    setBusy(true); setError(null); setPreview(null); setUpload(null); setProgress(0)
     try {
-      const created = await api.upload(file)
+      const created = await api.upload(file, setProgress)
       setUpload(created)
       const first = created.sheets?.[0]?.name || ''
       setSheet(created.is_excel ? first : '')
       await loadPreview(created.id, created.is_excel ? first : undefined)
-    } catch (e) { setError(e.message) } finally { setBusy(false) }
+    } catch (e) { setError(e.message) } finally { setBusy(false); setProgress(null) }
   }
 
   const loadPreview = async (id, sheetName) => {
@@ -188,7 +189,16 @@ This cannot be undone.`)) return
               </FormControl>
             )}
           </Stack>
-          {busy && <LinearProgress sx={{ mt: 2 }} />}
+          {busy && (progress === null
+            ? <LinearProgress sx={{ mt: 2 }} />
+            : (
+              <Box sx={{ mt: 2 }}>
+                <LinearProgress variant="determinate" value={Math.round(progress * 100)} />
+                <Typography variant="caption" color="text.secondary">
+                  Uploading… {Math.round(progress * 100)}%
+                </Typography>
+              </Box>
+            ))}
         </CardContent>
       </Card>
 

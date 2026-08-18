@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import shutil
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -21,10 +21,13 @@ from ..ingest.schema import (
     header_signature,
     suggest_mapping,
 )
-from ..models import Client, MappingTemplate, RawUpload
+from ..models import Client, MappingTemplate, RawUpload, UploadChunk
 from ..schemas import IngestRequest, UploadOut
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
+
+# A runaway client could otherwise stage unbounded rows before completing.
+MAX_CHUNKS = 2000
 
 
 def _owned_upload(db: Session, upload_id: int, client_id: int) -> RawUpload:
@@ -56,42 +59,37 @@ def list_uploads(client: Client = Depends(require_client), db: Session = Depends
     ).scalars().all()
 
 
-@router.post("", response_model=dict)
-async def create_upload(
-    file: UploadFile = File(...),
-    client_id: int = Form(..., description="Organisation this file belongs to"),
-    db: Session = Depends(get_db),
-):
-    """Store a file *against a client*.
+ALLOWED_SUFFIXES = {".csv", ".xlsx", ".xlsm", ".tsv", ".txt"}
 
-    The client is fixed here, at upload time — not guessed later from a name in
-    the ingest form. That is what stops a file landing in the wrong org.
+
+def _register_upload(db: Session, client: Client, filename: str, content_type: str | None,
+                     data: bytes) -> dict:
+    """Persist an assembled file and describe it back to the UI.
+
+    Shared by the single-request path and the chunked one, so a small file and
+    a large one produce exactly the same upload row and response.
     """
-    client = resolve_client(db, client_id)
-
-    suffix = Path(file.filename or "upload").suffix.lower()
-    if suffix not in {".csv", ".xlsx", ".xlsm", ".tsv", ".txt"}:
+    suffix = Path(filename or "upload").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(400, f"Unsupported file type '{suffix}'. Upload CSV or XLSX.")
+
     stored = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
-    with stored.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    stored.write_bytes(data)
 
     # Disk alone is not durable on a serverless host, so the bytes are also kept
     # in the database and every later read goes through storage.local_path.
     try:
-        blob_key = storage.put(
-            db, stored.read_bytes(), file.filename or stored.name, file.content_type
-        )
+        blob_key = storage.put(db, data, filename or stored.name, content_type)
     except ValueError as exc:
         stored.unlink(missing_ok=True)
         raise HTTPException(413, str(exc))
 
     upload = RawUpload(
-        filename=file.filename or stored.name,
+        filename=filename or stored.name,
         stored_path=str(stored),
         blob_key=blob_key,
-        content_type=file.content_type,
-        size_bytes=stored.stat().st_size,
+        content_type=content_type,
+        size_bytes=len(data),
         client_id=client.id,
         status="uploaded",
     )
@@ -116,6 +114,84 @@ async def create_upload(
         "sheets": sheets,
         "is_excel": readers.is_excel(stored),
     }
+
+
+@router.post("", response_model=dict)
+async def create_upload(
+    file: UploadFile = File(...),
+    client_id: int = Form(..., description="Organisation this file belongs to"),
+    db: Session = Depends(get_db),
+):
+    """Store a file *against a client*.
+
+    The client is fixed here, at upload time — not guessed later from a name in
+    the ingest form. That is what stops a file landing in the wrong org.
+
+    Suits files that fit in one request. Anything larger is sent to /chunk and
+    assembled by /complete, because a serverless host caps a request body at a
+    few megabytes.
+    """
+    client = resolve_client(db, client_id)
+    return _register_upload(db, client, file.filename or "", file.content_type,
+                            await file.read())
+
+
+@router.post("/chunk", response_model=dict)
+async def upload_chunk(
+    file: UploadFile = File(..., description="One slice of the file"),
+    token: str = Form(..., description="Client-generated id shared by every slice"),
+    seq: int = Form(..., description="0-based position of this slice"),
+    client_id: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Stage one slice of a large upload."""
+    resolve_client(db, client_id)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", token):
+        raise HTTPException(400, "Invalid upload token.")
+    if seq < 0 or seq > MAX_CHUNKS:
+        raise HTTPException(400, f"Chunk index out of range (0-{MAX_CHUNKS}).")
+
+    data = await file.read()
+    # Re-sending a slice replaces it, so a retried request cannot duplicate bytes.
+    db.query(UploadChunk).filter(
+        UploadChunk.token == token, UploadChunk.seq == seq
+    ).delete(synchronize_session=False)
+    db.add(UploadChunk(token=token, seq=seq, data=data))
+    db.commit()
+    return {"token": token, "seq": seq, "bytes": len(data)}
+
+
+@router.post("/complete", response_model=dict)
+def complete_upload(
+    token: str = Form(...),
+    filename: str = Form(...),
+    total: int = Form(..., description="How many slices were sent"),
+    client_id: int = Form(...),
+    content_type: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Join the staged slices back into one file and register it."""
+    client = resolve_client(db, client_id)
+    chunks = db.execute(
+        select(UploadChunk).where(UploadChunk.token == token).order_by(UploadChunk.seq)
+    ).scalars().all()
+    if not chunks:
+        raise HTTPException(400, "No uploaded parts found for this token.")
+    if len(chunks) != total or [c.seq for c in chunks] != list(range(total)):
+        got = sorted(c.seq for c in chunks)
+        raise HTTPException(
+            400,
+            f"Upload is incomplete: expected {total} parts, have {len(chunks)} ({got[:10]}...).",
+        )
+
+    data = b"".join(c.data for c in chunks)
+    try:
+        return _register_upload(db, client, filename, content_type, data)
+    finally:
+        db.query(UploadChunk).filter(UploadChunk.token == token).delete(
+            synchronize_session=False
+        )
+        db.commit()
 
 
 @router.get("/{upload_id}/preview")

@@ -1,5 +1,9 @@
 const BASE = '/api'
 
+// Vercel caps a function request body at 4.5 MB. Slice well under it so the
+// multipart envelope cannot push a chunk over the edge.
+const CHUNK_BYTES = 3 * 1024 * 1024
+
 /**
  * Client scoping.
  *
@@ -84,12 +88,47 @@ export const api = {
 
   datasets: () => request('/uploads/datasets'),
   uploads: () => request(scoped('/uploads')),
-  upload: (file) => {
+  /**
+   * Send a file, in one request or several.
+   *
+   * A serverless host rejects a request body over ~4.5 MB before it ever
+   * reaches the API, which showed up as a bare "413 Request failed". Anything
+   * near that ceiling is sliced here and rejoined server-side, so file size
+   * stops being something the person uploading has to think about.
+   */
+  upload: async (file, onProgress) => {
     if (!activeClientId) throw new Error('No client selected')
+
+    if (file.size <= CHUNK_BYTES) {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('client_id', String(activeClientId))
+      const result = await request('/uploads', { method: 'POST', body: form })
+      onProgress?.(1)
+      return result
+    }
+
+    const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+    const total = Math.ceil(file.size / CHUNK_BYTES)
+    for (let seq = 0; seq < total; seq += 1) {
+      const form = new FormData()
+      form.append('file', file.slice(seq * CHUNK_BYTES, (seq + 1) * CHUNK_BYTES), `${file.name}.part${seq}`)
+      form.append('token', token)
+      form.append('seq', String(seq))
+      form.append('client_id', String(activeClientId))
+      await request('/uploads/chunk', { method: 'POST', body: form })
+      onProgress?.((seq + 1) / (total + 1))
+    }
+
     const form = new FormData()
-    form.append('file', file)
+    form.append('token', token)
+    form.append('filename', file.name)
+    form.append('total', String(total))
     form.append('client_id', String(activeClientId))
-    return request('/uploads', { method: 'POST', body: form })
+    if (file.type) form.append('content_type', file.type)
+    const result = await request('/uploads/complete', { method: 'POST', body: form })
+    onProgress?.(1)
+    return result
   },
   preview: (id, sheet) =>
     request(scoped(`/uploads/${id}/preview${sheet ? `?sheet=${encodeURIComponent(sheet)}` : ''}`)),

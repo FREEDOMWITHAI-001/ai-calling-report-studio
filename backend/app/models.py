@@ -267,6 +267,25 @@ class FileBlob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class UploadChunk(Base):
+    """One slice of a file being uploaded across several requests.
+
+    Vercel caps a request body at 4.5 MB, so a larger file arrives in pieces.
+    The pieces cannot be assembled on local disk: each request may hit a
+    different instance, so a half-written temp file would be invisible to the
+    next chunk. They are staged here and concatenated on completion.
+    """
+
+    __tablename__ = "upload_chunks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("token", "seq", name="uq_upload_chunk_token_seq"),)
+
+
 class RawUpload(Base):
     __tablename__ = "raw_uploads"
     id: Mapped[int] = mapped_column(primary_key=True)
