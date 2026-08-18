@@ -4,7 +4,7 @@ import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Card, CardContent,
   Checkbox, Chip, CircularProgress, Divider, FormControl, FormControlLabel, Grid, IconButton,
   InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell,
-  TableHead, TableRow, TextField, Tooltip, Typography, useTheme,
+  Tab, TableHead, TableRow, Tabs, TextField, Tooltip, Typography, useTheme,
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import DownloadIcon from '@mui/icons-material/Download'
@@ -131,7 +131,16 @@ export default function ReportsPage() {
         : [...prev.formats, key],
     }))
 
-  const head = result?.headline
+  // Which webinar the preview is showing. 0 is the combined view; the rest are
+  // the per-webinar results the API returns for a format that splits by one.
+  const [tab, setTab] = useState(0)
+  const splits = result?.by_program || []
+  useEffect(() => { setTab(0) }, [result])
+  const shown = tab > 0 && splits[tab - 1]
+    ? { ...result, headline: splits[tab - 1].headline, groups: splits[tab - 1].groups }
+    : result
+  const shownLabel = tab > 0 && splits[tab - 1] ? splits[tab - 1].program : null
+  const head = shown?.headline
   const dailyChart = (result?.daily || []).map((day) => {
     const rows = Object.fromEntries(day.rows.map((r) => [r.key, r]))
     const both = rows.both?.registrants || 0
@@ -310,9 +319,28 @@ export default function ReportsPage() {
             </Grid>
           </Grid>
 
-          {/* A format that renders a sheet per webinar previews that way too,
-              so the split is visible before anything is exported. */}
-          {result.by_program?.length > 1 && (
+          {splits.length > 1 && (
+            <Paper variant="outlined" sx={{ px: 1, borderRadius: 2 }}>
+              <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable"
+                    allowScrollButtonsMobile>
+                <Tab label="Overview — all webinars" />
+                {splits.map((p) => (
+                  <Tab key={p.program}
+                       label={`${p.program} · ${fmt.multiple(p.headline?.roi)}`} />
+                ))}
+              </Tabs>
+            </Paper>
+          )}
+
+          {shownLabel && (
+            <Alert severity="info" icon={false}>
+              Showing <strong>{shownLabel}</strong> only — costed against its own bots, so this
+              ROI is {shownLabel}&apos;s alone.
+            </Alert>
+          )}
+
+          {/* The comparison table stays on the combined tab, where it belongs. */}
+          {tab === 0 && splits.length > 1 && (
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>Each webinar on its own</Typography>
@@ -360,13 +388,13 @@ export default function ReportsPage() {
             <CardContent>
               <Typography variant="h6" gutterBottom>Show-up &amp; buyers by bot reached</Typography>
               <Typography variant="caption" color="text.secondary">
-                Δ compares each group with the baseline ({result.groups?.baseline?.label || 'not connected'}). Bot rows
+                Δ compares each group with the baseline ({shown.groups?.baseline?.label || 'not connected'}). Bot rows
                 overlap: a lead reached by both appears in each.
               </Typography>
               <Box sx={{ mt: 2, overflowX: 'auto' }}>
                 <GroupTable rows={['total', 'signup', 'day_of', 'both', 'baseline']
-                  .filter((key) => result.groups?.[key])
-                  .map((key) => ({ ...result.groups[key], key }))} />
+                  .filter((key) => shown.groups?.[key])
+                  .map((key) => ({ ...shown.groups[key], key }))} />
               </Box>
               <Alert severity="info" sx={{ mt: 2 }}>
                 Show-up {fmtP(result.significance?.show_up)} · Buying {fmtP(result.significance?.buying)}
