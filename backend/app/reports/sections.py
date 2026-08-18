@@ -1498,6 +1498,19 @@ def _programme_report(cohort: Cohort, config: dict) -> list[Block]:
             ),
         ]
 
+    # Which bots were counted here, so a bot tagged to the wrong webinar reads
+    # as a tagging mistake rather than as a bot that achieved nothing.
+    counted = sorted((calls.get("by_bot") or {}))
+    everywhere = sorted((calls.get("bots_in_window") or {}))
+    ignored = [b for b in everywhere if b not in counted]
+    blocks.append(text(
+        "Counted for this webinar: " + (", ".join(counted) or "no bots") + ". "
+        + (f"Not counted here: {', '.join(ignored)}. " if ignored else "")
+        + "A bot appears above only if its Webinar and Role are set in Settings; one tagged "
+        "to the other webinar shows as zero here and its talk time is charged there.",
+        title="BOTS COUNTED",
+    ))
+
     blocks.append(text(
         "Each webinar day below, split by the bots that connected with those leads.",
         title="PER-WEBINAR DETAIL",
