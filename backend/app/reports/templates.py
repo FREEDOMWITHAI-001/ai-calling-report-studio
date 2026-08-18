@@ -46,6 +46,9 @@ class Template:
     formats: list[str] = field(default_factory=lambda: ["xlsx", "pdf"])
     brand: Brand = field(default_factory=Brand)
     cover_title: str | None = None
+    # Most formats open on a cover sheet. CoachEasily's workbook is two sheets
+    # exactly, so it turns the cover off rather than gaining a third.
+    cover: bool = True
 
 
 # ------------------------------------------------------------------ #
@@ -144,7 +147,26 @@ LEAD_LIST = Template(
     formats=["xlsx", "pdf"],
 )
 
-BUILT_IN: dict[str, Template] = {t.key: t for t in (BOOTCAMP, WEBINAR, LEAD_LIST)}
+COACHEASILY_GENERAL = Template(
+    key="coacheasily_general",
+    label="CoachEasily General",
+    description=(
+        "The CoachEasily workbook: an Overview that shows how the AI-credited sales and the "
+        "ROI are derived, and a per-programme report giving show-up and buyers by bot for the "
+        "whole window and then for each call day. Two sheets, no cover."
+    ),
+    cover_title=None,
+    cover=False,
+    formats=["xlsx"],
+    sections=[
+        SectionRef("coacheasily_overview", title="Overview"),
+        SectionRef("coacheasily_report", title="CBA X report"),
+    ],
+)
+
+BUILT_IN: dict[str, Template] = {
+    t.key: t for t in (BOOTCAMP, WEBINAR, LEAD_LIST, COACHEASILY_GENERAL)
+}
 
 DEFAULT_TEMPLATE_KEY = "webinar"   # the common format
 
@@ -175,6 +197,7 @@ def from_record(record) -> Template:
         formats=spec.get("formats") or base.formats,
         brand=brand,
         cover_title=spec.get("cover_title") or base.cover_title,
+        cover=spec.get("cover", base.cover),
     )
 
 

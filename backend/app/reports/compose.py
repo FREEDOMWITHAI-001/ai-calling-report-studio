@@ -53,6 +53,7 @@ def compose(
             "template": template.key,
             "template_label": template.label,
             "cover_title": template.cover_title,
+            "cover": template.cover,
             "date_from": date_from.isoformat(),
             "date_to": date_to.isoformat(),
             "window_days": cohort.window_days,

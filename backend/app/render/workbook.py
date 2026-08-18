@@ -189,19 +189,9 @@ def _sheet_name(title: str, used: set[str]) -> str:
     return name
 
 
-def build_workbook(doc: dict, path: str | Path) -> Path:
-    """Render a composed document to XLSX. Returns the path written."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    brand = doc.get("brand") or {}
-    wb = Workbook()
-    wb.remove(wb.active)
-    used: set[str] = set()
-
-    # Cover
+def _render_cover(wb, meta: dict, doc: dict, brand: dict, used: set) -> None:
+    """The title sheet: what this report is, and the headline counts."""
     cover = Sheet(wb.create_sheet(_sheet_name("Cover", used)), brand)
-    meta = doc["meta"]
     cover.write(1, meta.get("cover_title") or meta["title"], bold=True, size=18,
                 color=brand.get("accent"))
     cover.row += 2
@@ -243,6 +233,22 @@ def build_workbook(doc: dict, path: str | Path) -> Path:
             cover.write(2, item["reason"], size=9, color=brand.get("muted"))
             cover.row += 1
     cover.finish()
+
+
+def build_workbook(doc: dict, path: str | Path) -> Path:
+    """Render a composed document to XLSX. Returns the path written."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    brand = doc.get("brand") or {}
+    wb = Workbook()
+    wb.remove(wb.active)
+    used: set[str] = set()
+
+    meta = doc["meta"]
+    # A format can opt out of the cover when its layout is a fixed set of sheets.
+    if meta.get("cover", True):
+        _render_cover(wb, meta, doc, brand, used)
 
     # One sheet per available section
     for section in doc["sections"]:

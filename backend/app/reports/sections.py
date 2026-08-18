@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 
 from ..metrics.cohort import Cohort
 from ..metrics.stats import (
@@ -823,3 +824,412 @@ def _methodology(c: Cohort, cfg: dict) -> list[Block]:
              "who did not in ways this data cannot see, so treat the uplift as association, not "
              "proof of cause."),
     ]
+
+
+# ------------------------------------------------------------------ #
+# CoachEasily General
+#
+# The other formats give each section its own sheet. CoachEasily's workbook
+# instead stacks several titled blocks down two sheets — an Overview that
+# explains the arithmetic, and a per-programme report ending in a per-day
+# breakdown. Because a section already holds a list of blocks, that shape needs
+# no renderer change: it is two sections carrying many blocks each.
+#
+# The numbers come from metrics.engine, which already computes the banded
+# weighted uplift this format is built around. Recomputing them here would be a
+# second implementation of the same method, free to drift from the first.
+# ------------------------------------------------------------------ #
+
+_ENGINE_CACHE_ATTR = "_coacheasily_engine"
+
+
+def _engine_result(cohort: Cohort) -> dict:
+    """The engine's figures for this cohort, computed once per report."""
+    cached = getattr(cohort, _ENGINE_CACHE_ATTR, None)
+    if cached is None:
+        from ..metrics.engine import compute_report
+        cached = compute_report(
+            cohort.db,
+            client_id=cohort.client_id,
+            date_from=cohort.date_from,
+            date_to=cohort.date_to,
+            params=cohort.params,
+            language=cohort.language,
+            program=cohort.program,
+        )
+        setattr(cohort, _ENGINE_CACHE_ATTR, cached)
+    return cached
+
+
+def _client_name(cohort: Cohort) -> str:
+    from ..models import Client
+    client = cohort.db.get(Client, cohort.client_id)
+    return client.name if client else ""
+
+
+def _programme_label(cohort: Cohort) -> str:
+    """Reads like "CoachEasily — CBA X (English)" when those parts are known."""
+    label = _client_name(cohort)
+    if cohort.program:
+        label = f"{label} — {cohort.program}" if label else cohort.program
+    return f"{label} ({cohort.language})" if cohort.language else label
+
+
+def _money(value) -> str:
+    return f"₹{value:,.0f}" if isinstance(value, (int, float)) else "—"
+
+
+def _round1(value) -> str:
+    return f"{value:,.1f}" if isinstance(value, (int, float)) else "—"
+
+
+def _int_str(value) -> str:
+    return f"{value:,.0f}" if isinstance(value, (int, float)) else "—"
+
+
+def _day_label(iso: str | None) -> str:
+    if not iso:
+        return "Unknown day"
+    try:
+        return date.fromisoformat(iso).strftime("%d %b %Y")
+    except (TypeError, ValueError):
+        return str(iso)
+
+
+# Columns shared by the whole-window table and every per-day block, so the
+# per-day detail reads as the summary broken apart rather than a new shape.
+_GROUP_COLUMNS = [
+    Col("group", "Group"),
+    Col("registrants", "Registrants", "int", "right"),
+    Col("showed", "Showed", "int", "right"),
+    Col("show_rate", "Show-up %", "pct", "right"),
+    Col("show_delta", "Show-up Δ", "delta", "right"),
+    Col("buyers", "Buyers", "int", "right"),
+    Col("buy_rate", "Buyer %", "pct", "right"),
+    Col("buy_delta", "Buyer Δ", "delta", "right"),
+]
+
+
+def _group_row(label: str, stats: dict) -> dict:
+    return {
+        "group": label,
+        "registrants": stats.get("registrants"),
+        "showed": stats.get("showed"),
+        "show_rate": stats.get("show_rate"),
+        "show_delta": stats.get("show_delta"),
+        "buyers": stats.get("buyers"),
+        "buy_rate": stats.get("buy_rate"),
+        "buy_delta": stats.get("buy_delta"),
+    }
+
+
+@section("coacheasily_overview", "Overview", ("registrations", "ai_calls", "sales"),
+         "CoachEasily overview: revenue, how the credited sales are derived, cost and ROI.")
+def _coacheasily_overview(cohort: Cohort, config: dict) -> list[Block]:
+    result = _engine_result(cohort)
+    head = result["headline"]
+    calls = result["calls"]
+    groups = result["groups"]
+    rate = calls.get("cost_per_minute") or cohort.rate_per_min
+
+    revenue_row = {
+        "program": _programme_label(cohort),
+        "revenue_without": head.get("revenue_without_ai"),
+        "revenue_with": head.get("revenue_with_ai"),
+        "added": head.get("revenue_added"),
+        "uplift": head.get("relative_uplift"),
+        "roi": head.get("roi"),
+    }
+    blocks: list[Block] = [
+        table(
+            "REVENUE WITH AI CALLING vs WITHOUT",
+            [
+                Col("program", "Program"),
+                Col("revenue_without", "Revenue without AI", "money", "right"),
+                Col("revenue_with", "Revenue with AI", "money", "right"),
+                Col("added", "AI added", "money", "right"),
+                Col("uplift", "Relative uplift", "delta", "right"),
+                Col("roi", "ROI", "multiple", "right"),
+            ],
+            [revenue_row, {**revenue_row, "program": "Total"}],
+            emphasis={"Total": "total"},
+        ),
+        text(
+            f"Method: revenue with AI is all {_int_str(head.get('buyers'))} buyers among the "
+            f"registrants in this window. Revenue without AI removes the "
+            f"{_round1(head.get('extra_sales'))} sales credited to calling, each valued at "
+            f"{_money(head.get('sale_value'))}."
+        ),
+    ]
+
+    # How the credited sales are derived, band by band.
+    band_rows = [
+        {
+            "band": row["band"],
+            "connected": row["connected"],
+            "connected_buy_rate": row["connected_buy_rate"],
+            "baseline": row["baseline"],
+            "baseline_buy_rate": row["baseline_buy_rate"],
+            "gap": row["gap_points"],
+            "extra": row["extra_sales"],
+        }
+        for row in result.get("bands", [])
+    ]
+    connected_stats = groups.get("connected", {})
+    baseline_stats = groups.get("baseline", {})
+    total_band_label = "TOTAL  (weighted average of the bands)"
+    band_rows.append({
+        "band": total_band_label,
+        "connected": connected_stats.get("registrants"),
+        "connected_buy_rate": connected_stats.get("buy_rate"),
+        "baseline": baseline_stats.get("registrants"),
+        "baseline_buy_rate": baseline_stats.get("buy_rate"),
+        "gap": head.get("weighted_gap_points"),
+        "extra": head.get("extra_sales"),
+    })
+    blocks += [
+        table(
+            "HOW THE AI-CREDITED SALES ARE CALCULATED  (lead-age bands)",
+            [
+                Col("band", "Time the lead had to buy"),
+                Col("connected", "Connected", "int", "right"),
+                Col("connected_buy_rate", "their buy %", "pct", "right"),
+                Col("baseline", "Not connected", "int", "right"),
+                Col("baseline_buy_rate", "their buy %", "pct", "right"),
+                Col("gap", "Gap", "pct", "right"),
+                Col("extra", "Extra sales", "number", "right"),
+            ],
+            band_rows,
+            emphasis={total_band_label: "total"},
+        ),
+        text(
+            "Read a row like this: of the leads that had this long to buy, this many were "
+            "reached by a bot and that share of them bought; the ones no bot reached bought "
+            "at the lower rate beside it. The gap between those two rates, times the number "
+            "reached, is what calling is credited with in that band."
+        ),
+    ]
+
+    # The same figures again as plain multiplication, so the total is checkable.
+    mult_rows = [
+        {"band": row["band"], "connected": row["connected"], "times": "×",
+         "gap": row["gap_points"], "equals": "=", "extra": row["extra_sales"]}
+        for row in result.get("bands", [])
+    ]
+    mult_total_label = "TOTAL extra sales credited to AI"
+    mult_rows.append({
+        "band": mult_total_label,
+        "connected": connected_stats.get("registrants"), "times": "×",
+        "gap": head.get("weighted_gap_points"), "equals": "=",
+        "extra": head.get("extra_sales"),
+    })
+    blocks += [
+        table(
+            f"HOW THE {_round1(head.get('extra_sales'))} EXTRA SALES ADD UP  "
+            "(each band: connected × gap)",
+            [
+                Col("band", "Band"),
+                Col("connected", "Connected leads", "int", "right"),
+                Col("times", "×"),
+                Col("gap", "Gap (buy % difference)", "pct", "right"),
+                Col("equals", "="),
+                Col("extra", "Extra sales", "number", "right"),
+            ],
+            mult_rows,
+            emphasis={mult_total_label: "total"},
+        ),
+        text("Every line here is multiplication you can redo by hand."),
+    ]
+
+    # What the calls cost, per bot.
+    by_bot = calls.get("by_bot") or {}
+    cost_rows = [
+        {
+            "bot": bot_name,
+            "calls": bucket.get("calls"),
+            "talk": round((bucket.get("talk_seconds") or 0) / 60, 1),
+            "billed": bucket.get("billed_minutes"),
+            "cost": (bucket.get("billed_minutes") or 0) * rate,
+        }
+        for bot_name, bucket in by_bot.items()
+    ]
+    cost_rows.append({
+        "bot": "TOTAL",
+        "calls": sum(b.get("calls") or 0 for b in by_bot.values()),
+        "talk": round((calls.get("talk_seconds") or 0) / 60, 1),
+        "billed": calls.get("billed_minutes"),
+        "cost": calls.get("talk_cost"),
+    })
+    blocks += [
+        table(
+            f"WHAT THE CALLS COST  ({_money(rate)} per minute)",
+            [
+                Col("bot", "Bot"),
+                Col("calls", "Calls with talk time", "int", "right"),
+                Col("talk", "Actual talk time (min)", "number", "right"),
+                Col("billed", "Billed minutes", "int", "right"),
+                Col("cost", "Cost", "money", "right"),
+            ],
+            cost_rows,
+            emphasis={"TOTAL": "total"},
+        ),
+        text(
+            f"{_int_str(calls.get('calls_with_audio'))} of the "
+            f"{_int_str(calls.get('calls_placed'))} calls the bots placed were answered at "
+            "all. Billing is charged in whole minutes, so billed minutes exceed actual talk "
+            "time."
+        ),
+    ]
+
+    # The ROI, one step per line.
+    roi_verdict = "= ROI"
+    blocks += [
+        table(
+            "THE ROI",
+            [Col("step", "Step"), Col("value", "Value", "text", "right")],
+            [
+                {"step": "Extra sales the AI is credited with",
+                 "value": head.get("extra_sales"), "_fmt_value": "number"},
+                {"step": f"× price of the programme ({_money(head.get('sale_value'))})",
+                 "value": head.get("revenue_added"), "_fmt_value": "money"},
+                {"step": "÷ what the calls cost",
+                 "value": head.get("talk_cost"), "_fmt_value": "money"},
+                {"step": roi_verdict, "value": head.get("roi"), "_fmt_value": "multiple"},
+            ],
+            emphasis={roi_verdict: "verdict"},
+        ),
+        text(
+            f"So {_round1(head.get('extra_sales'))} extra sales × "
+            f"{_money(head.get('sale_value'))} = {_money(head.get('revenue_added'))} of revenue "
+            f"credited to AI calling, against {_money(head.get('talk_cost'))} of call cost."
+        ),
+    ]
+    return blocks
+
+
+def _method_items(cohort: Cohort, result: dict) -> list[Item]:
+    """The audit trail the CoachEasily workbook closes on.
+
+    Label/detail pairs rather than a table: each line names one decision the
+    numbers depend on and states how it was made, so a reader can challenge the
+    method without re-deriving it.
+    """
+    head = result["headline"]
+    calls = result["calls"]
+    audit = result.get("audit") or {}
+    groups = result["groups"]
+    params = result.get("meta", {}).get("params") or cohort.params
+    threshold = audit.get("connected_threshold_s", cohort.connect_threshold_s)
+    baseline = groups.get("baseline", {})
+    bands = result.get("bands") or []
+
+    return [
+        Item("Connected",
+             f"Talk time longer than {threshold} seconds. Of "
+             f"{_int_str(calls.get('calls_placed'))} calls placed, "
+             f"{_int_str(calls.get('calls_with_audio'))} were answered at all and "
+             f"{_int_str(calls.get('calls_connected'))} passed that bar.", "text"),
+        Item("Buyers",
+             f"{_int_str(head.get('buyers'))} buyers among the registrants in this window"
+             + (f", counted against {_int_str(audit.get('sale_rows_in_window'))} sale rows."
+                if audit.get("sale_rows_in_window") else "."), "text"),
+        Item("Show-up",
+             f"Per-person match against the attendance data: "
+             f"{_int_str(groups.get('total', {}).get('showed'))} of "
+             f"{_int_str(groups.get('total', {}).get('registrants'))} registrants attended.",
+             "text"),
+        Item("Bot coverage",
+             "Only the bots this report measures are counted: "
+             + ", ".join(sorted((calls.get("by_bot") or {}))) + ".", "text"),
+        Item("Team / test numbers",
+             f"{_int_str(audit.get('team_registration_rows'))} internal and test rows were "
+             "removed before any figure was calculated.", "text"),
+        Item("Baseline (what 'not connected' means)",
+             f"One comparison group of {_int_str(baseline.get('registrants'))} people: "
+             f"{baseline.get('label') or 'everyone no bot connected with'}.", "text"),
+        Item("Extra sales — the weighted calculation",
+             f"Registrants are split into {len(bands)} bands by how long they had to buy. "
+             "Within each band the connected buy rate is compared with the not-connected "
+             "buy rate, and the gap times the connected count is the credit for that band.",
+             "text"),
+        Item(f"Cost — the {_money(calls.get('cost_per_minute'))} per minute check",
+             f"{_int_str(calls.get('billed_minutes'))} billed minutes "
+             f"({_round1((calls.get('talk_seconds') or 0) / 60)} actual), charged in whole "
+             f"minutes, giving {_money(calls.get('talk_cost'))}.", "text"),
+        Item("THE BIG CAVEAT",
+             "This is an observational comparison, not a randomised test. People a bot "
+             "reached may differ from people it did not reach in ways this data cannot see, "
+             "so read the uplift as association rather than proof of cause.", "text",
+             tone="warn"),
+    ]
+
+
+@section("coacheasily_report", "CBA X report",
+         ("registrations", "ai_calls", "attendance", "sales"),
+         "CoachEasily per-programme report: impact, show-up by bot, and each call day.")
+def _coacheasily_report(cohort: Cohort, config: dict) -> list[Block]:
+    result = _engine_result(cohort)
+    head = result["headline"]
+    groups = result["groups"]
+    calls = result["calls"]
+
+    blocks: list[Block] = [
+        kpi("BUSINESS IMPACT — with AI vs without", [
+            Item("Revenue without AI calling", head.get("revenue_without_ai"), "money"),
+            Item("Revenue with AI calling", head.get("revenue_with_ai"), "money"),
+            Item("AI calling added", head.get("revenue_added"), "money", tone="pos"),
+            Item("Relative revenue increase", head.get("relative_uplift"), "delta"),
+            Item("Extra sales credited to AI (weighted, like-for-like)",
+                 head.get("extra_sales"), "number"),
+            Item("Sale value", head.get("sale_value"), "money"),
+            Item(f"Talk-minutes × {_money(calls.get('cost_per_minute'))}  (Signup+Day-of)",
+                 head.get("talk_cost"), "money"),
+            Item("ROI (return multiple)", head.get("roi"), "multiple", tone="accent"),
+        ]),
+    ]
+
+    # Fixed order so the reader always meets the groups in the same sequence;
+    # the baseline keeps whatever wording the engine's baseline_mode gave it.
+    order = [
+        ("total", "Total"),
+        ("signup", "Signup bot (Instant Conf.)"),
+        ("day_of", "Day-of bot (Session Today)"),
+        ("both", "Both bots"),
+        ("connected", f"Any bot connected (> {cohort.connect_threshold_s}s)"),
+        ("baseline", None),
+    ]
+    summary_rows = []
+    for key, label in order:
+        stats = groups.get(key)
+        if not stats:
+            continue
+        summary_rows.append(_group_row(label or stats.get("label") or key, stats))
+    baseline_label = summary_rows[-1]["group"] if summary_rows else ""
+    blocks += [
+        table(
+            "SHOW-UP & BUYERS — by bot reached (whole window)",
+            _GROUP_COLUMNS, summary_rows,
+            emphasis={"Total": "total", baseline_label: "baseline"},
+        ),
+        text(
+            "Every group is compared against the baseline row. The Δ columns are the "
+            "relative difference against it, not percentage points."
+        ),
+    ]
+
+    blocks.append(text(
+        "Each webinar day below, split by the bots that reached those registrants.",
+        title="PER-CALL-DAY DETAIL",
+    ))
+    for day in result.get("daily", []):
+        rows = [_group_row(r.get("label") or r.get("key") or "", r)
+                for r in day.get("rows", [])]
+        if not rows:
+            continue
+        blocks.append(table(
+            _day_label(day.get("date")), _GROUP_COLUMNS, rows,
+            emphasis={"Total": "total"},
+        ))
+
+    blocks.append(kpi("METHOD, SOURCES & DATA AUDIT", _method_items(cohort, result)))
+    return blocks
