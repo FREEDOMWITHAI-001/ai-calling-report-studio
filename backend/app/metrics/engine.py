@@ -44,12 +44,14 @@ def _merge_params(params: dict | None) -> dict:
     return merged
 
 
-def _bot_maps(db: Session, client_id: int, params: dict) -> tuple[dict[str, str], dict[str, str | None]]:
+def _bot_maps(db: Session, client_id: int, params: dict):
     roles: dict[str, str] = {}
     languages: dict[str, str | None] = {}
+    programs: dict[str, str | None] = {}
     for bot in db.execute(select(Bot).where(Bot.client_id == client_id)).scalars():
         roles[bot.name] = bot.role
         languages[bot.name] = bot.language
+        programs[bot.name] = bot.program
     # Patterns win over whatever was stored at ingest time, so editing the
     # methodology re-classifies bots without re-uploading anything.
     for name in list(roles):
@@ -58,7 +60,11 @@ def _bot_maps(db: Session, client_id: int, params: dict) -> tuple[dict[str, str]
             roles[name] = "signup"
         elif any(p.lower() in lowered for p in params.get("dayof_bot_patterns", [])):
             roles[name] = "day_of"
-    return roles, languages
+        for program, patterns in (params.get("program_bot_patterns") or {}).items():
+            if any(str(pat).lower() in lowered for pat in patterns):
+                programs[name] = program
+                break
+    return roles, languages, programs
 
 
 def compute_report(
@@ -79,7 +85,7 @@ def compute_report(
     rate_per_min = float(params.get("cost_per_minute", 5.10))
     baseline_mode = params.get("baseline_mode", "not_connected")
 
-    roles, bot_languages = _bot_maps(db, client_id, params)
+    roles, bot_languages, bot_programs = _bot_maps(db, client_id, params)
     selected_bots = set(bot_names or [])
     lock_language = bool(language) and params.get("restrict_bots_to_language", True)
 
@@ -100,6 +106,14 @@ def compute_report(
         if lock_language:
             bot_language = bot_languages.get(bot_name)
             if bot_language and bot_language.lower() != language.lower():
+                return False
+        if program and any(bot_programs.values()):
+            # Two webinars running side by side each have their own bots. Once
+            # any bot is tagged, a report scoped to one programme counts only
+            # that programme's bots, so its ROI is not charged the other's
+            # talk time.
+            bot_program = bot_programs.get(bot_name)
+            if bot_program and bot_program.lower() != program.lower():
                 return False
         return True
 

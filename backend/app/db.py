@@ -34,6 +34,7 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("report_runs", "template_key", "VARCHAR(60)"),
     ("report_runs", "template_label", "VARCHAR(160)"),
     ("raw_uploads", "blob_key", "VARCHAR(64)"),
+    ("bots", "program", "VARCHAR(120)"),
 ]
 
 

@@ -20,8 +20,18 @@ DATE_FORMATS = (
     "%Y-%m-%d",
     "%d/%m/%Y %H:%M:%S",
     "%d/%m/%Y %I:%M %p",
+    "%d/%m/%Y %I:%M:%S %p",
     "%d/%m/%Y",
     "%d-%m-%Y",
+    "%d-%m-%Y %H:%M:%S",
+    # Day-first shapes are listed above month-first ones so an ambiguous date
+    # like 05/06/2026 keeps its existing reading. Zoom exports are month-first
+    # with a 12-hour clock, and without these every Zoom attendance row failed
+    # to parse and was dropped in silence.
+    "%m/%d/%Y %I:%M:%S %p",
+    "%m/%d/%Y %I:%M %p",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M",
     "%m/%d/%Y",
     "%d.%m.%Y",
     "%I:%M %p",

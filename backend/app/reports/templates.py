@@ -53,6 +53,12 @@ class Template:
     # Most formats open on a cover sheet. CoachEasily's workbook is two sheets
     # exactly, so it turns the cover off rather than gaining a third.
     cover: bool = True
+    # When set to "program", the sections below are built once per programme
+    # found in the window, each becoming its own sheet, and `overview_section`
+    # is rendered first to compare them. This is how a client running two
+    # webinars gets two reports and two ROIs in one workbook.
+    group_by: str | None = None
+    overview_section: str | None = None
 
 
 # ------------------------------------------------------------------ #
@@ -180,8 +186,35 @@ COACHEASILY_GENERAL = Template(
     ],
 )
 
+DVA_GENERAL = Template(
+    key="dva_general",
+    label="DVA General",
+    description=(
+        "For a client running more than one webinar. One sheet per webinar — business "
+        "impact, show-up and buyers by bot, the same rates with each day weighted equally, "
+        "then a block per webinar day — and an Overview putting the webinars side by side. "
+        "Each webinar is costed against its own bots only, so every ROI is its own."
+    ),
+    cover_title=None,
+    cover=False,
+    formats=["xlsx"],
+    group_by="program",
+    overview_section="programme_overview",
+    sections=[SectionRef("programme_report")],
+    brand=Brand(
+        accent="2E6DA4",
+        ink="1F2933",
+        muted="5A6B7C",
+        band="D9E1F2",
+        baseline="FFF2CC",
+        positive="1E7A44",
+        head_fill="D9E1F2",
+        head_ink="1F3864",
+    ),
+)
+
 BUILT_IN: dict[str, Template] = {
-    t.key: t for t in (BOOTCAMP, WEBINAR, LEAD_LIST, COACHEASILY_GENERAL)
+    t.key: t for t in (BOOTCAMP, WEBINAR, LEAD_LIST, COACHEASILY_GENERAL, DVA_GENERAL)
 }
 
 DEFAULT_TEMPLATE_KEY = "webinar"   # the common format
@@ -214,6 +247,8 @@ def from_record(record) -> Template:
         brand=brand,
         cover_title=spec.get("cover_title") or base.cover_title,
         cover=spec.get("cover", base.cover),
+        group_by=spec.get("group_by", base.group_by),
+        overview_section=spec.get("overview_section", base.overview_section),
     )
 
 

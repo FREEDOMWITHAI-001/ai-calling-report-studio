@@ -1246,3 +1246,188 @@ def _coacheasily_report(cohort: Cohort, config: dict) -> list[Block]:
 
     blocks.append(kpi("METHOD, SOURCES & DATA AUDIT", _method_items(cohort, result)))
     return blocks
+
+
+# ------------------------------------------------------------------ #
+# DVA General — two webinars, four bots, one ROI each
+#
+# CoachEasily runs one webinar, so one report describes it. DVA runs two side
+# by side with a signup and a day-of bot each, and the whole question is which
+# of them is paying for itself. That needs a sheet per webinar, each costed
+# against only its own bots, plus an Overview that puts them next to each other.
+#
+# The per-webinar cohorts are built in compose(); a section here only ever sees
+# one of them, except the overview, which is handed them all.
+# ------------------------------------------------------------------ #
+
+_PROGRAMME_GROUPS = [
+    ("total", "Total"),
+    ("signup", "Signup bot"),
+    ("day_of", "Day-of bot"),
+    ("both", "Both bots"),
+    ("baseline", "Not connected / not called"),
+]
+
+_LEAD_COLUMNS = [
+    Col("group", "Group"),
+    Col("leads", "Leads", "int", "right"),
+    Col("showed", "Showed", "int", "right"),
+    Col("show_rate", "Show-up %", "pct", "right"),
+    Col("show_delta", "Show-up Δ", "delta", "right"),
+    Col("buyers", "Buyers", "int", "right"),
+    Col("buy_rate", "Buyer %", "pct", "right"),
+    Col("buy_delta", "Buyer Δ", "delta", "right"),
+]
+
+
+def _lead_row(label: str, stats: dict) -> dict:
+    return {
+        "group": label,
+        "leads": stats.get("registrants"),
+        "showed": stats.get("showed"),
+        "show_rate": stats.get("show_rate"),
+        "show_delta": stats.get("show_delta"),
+        "buyers": stats.get("buyers"),
+        "buy_rate": stats.get("buy_rate"),
+        "buy_delta": stats.get("buy_delta"),
+    }
+
+
+def _mean(values: list[float]) -> float | None:
+    clean = [v for v in values if isinstance(v, (int, float))]
+    return sum(clean) / len(clean) if clean else None
+
+
+@section("programme_overview", "Overview", ("registrations", "ai_calls", "sales"),
+         "One row per webinar: revenue with and without AI, and each one's own ROI.")
+def _programme_overview(cohort: Cohort, config: dict) -> list[Block]:
+    """Every webinar side by side, each with the ROI of its own bots."""
+    programmes = config.get("programmes") or []
+    rows, totals = [], {"without": 0.0, "with": 0.0, "added": 0.0, "cost": 0.0}
+    for name, sub in programmes:
+        head = _engine_result(sub)["headline"]
+        rows.append({
+            "program": name,
+            "revenue_without": head.get("revenue_without_ai"),
+            "revenue_with": head.get("revenue_with_ai"),
+            "added": head.get("revenue_added"),
+            "uplift": head.get("relative_uplift"),
+            "roi": head.get("roi"),
+        })
+        totals["without"] += head.get("revenue_without_ai") or 0
+        totals["with"] += head.get("revenue_with_ai") or 0
+        totals["added"] += head.get("revenue_added") or 0
+        totals["cost"] += head.get("talk_cost") or 0
+
+    rows.append({
+        "program": "Total",
+        "revenue_without": totals["without"],
+        "revenue_with": totals["with"],
+        "added": totals["added"],
+        # The total is recomputed from the summed money, not averaged from the
+        # rows above: an average of ratios would not be either webinar's ROI.
+        "uplift": (totals["added"] / totals["without"]) if totals["without"] else None,
+        "roi": (totals["added"] / totals["cost"]) if totals["cost"] else None,
+    })
+
+    return [
+        table(
+            "REVENUE WITH AI CALLING vs WITHOUT",
+            [
+                Col("program", "Program"),
+                Col("revenue_without", "Revenue without AI", "money", "right"),
+                Col("revenue_with", "Revenue with AI", "money", "right"),
+                Col("added", "AI added", "money", "right"),
+                Col("uplift", "Relative uplift", "delta", "right"),
+                Col("roi", "ROI", "multiple", "right"),
+            ],
+            rows,
+            emphasis={"Total": "total"},
+        ),
+        text(
+            "Each webinar is costed against its own two bots only, so the ROI on a row is "
+            "that webinar's alone. The Total re-derives from the summed money rather than "
+            "averaging the ROIs above, which would belong to neither webinar."
+        ),
+    ]
+
+
+@section("programme_report", "Programme report",
+         ("registrations", "ai_calls", "attendance", "sales"),
+         "One webinar: business impact, show-up and buyers by bot, normalised, per day.")
+def _programme_report(cohort: Cohort, config: dict) -> list[Block]:
+    result = _engine_result(cohort)
+    head, groups, calls = result["headline"], result["groups"], result["calls"]
+    daily = result.get("daily", [])
+
+    blocks: list[Block] = [
+        kpi("BUSINESS IMPACT — with AI vs without", [
+            Item("Revenue without AI calling", head.get("revenue_without_ai"), "money"),
+            Item("Revenue with AI calling", head.get("revenue_with_ai"), "money"),
+            Item("AI calling added", head.get("revenue_added"), "money", tone="pos"),
+            Item("Relative revenue increase", head.get("relative_uplift"), "delta"),
+            Item("Incremental sales (vs control)", head.get("extra_sales"), "number"),
+            Item("Sale value", head.get("sale_value"), "money"),
+            Item(f"Talk-minutes × {_rate(calls.get('cost_per_minute'))} (cost)",
+                 head.get("talk_cost"), "money"),
+            Item("ROI (return multiple)", head.get("roi"), "multiple", tone="accent"),
+        ]),
+    ]
+
+    summary = []
+    for key, label in _PROGRAMME_GROUPS:
+        stats = groups.get(key)
+        if stats:
+            summary.append(_lead_row(label, stats))
+    baseline_label = summary[-1]["group"] if summary else ""
+    blocks.append(table(
+        "SHOW-UP & BUYERS — by bot connected (whole window)",
+        _LEAD_COLUMNS, summary,
+        emphasis={"Total": "total", baseline_label: "baseline"},
+    ))
+
+    # Weighting each webinar day equally stops one unusually large day from
+    # deciding the headline rate for the whole window.
+    if daily:
+        norm_rows = []
+        for key, label in _PROGRAMME_GROUPS:
+            per_day = [d for day in daily for d in day.get("rows", []) if d.get("key") == key]
+            if not per_day:
+                continue
+            stats = groups.get(key) or {}
+            show = _mean([d.get("show_rate") for d in per_day])
+            buy = _mean([d.get("buy_rate") for d in per_day])
+            norm_rows.append({
+                "group": label, "leads": stats.get("registrants"),
+                "showed": None, "show_rate": show, "buyers": None, "buy_rate": buy,
+                "show_delta": None, "buy_delta": None,
+            })
+        base = next((r for r in norm_rows if r["group"] == _PROGRAMME_GROUPS[-1][1]), None)
+        if base:
+            for row in norm_rows:
+                if row is base or row["group"] == "Total":
+                    continue
+                for rate_key, delta_key in (("show_rate", "show_delta"), ("buy_rate", "buy_delta")):
+                    if row[rate_key] is not None and base[rate_key]:
+                        row[delta_key] = row[rate_key] / base[rate_key] - 1
+        blocks += [
+            table("NORMALISED — each webinar day weighted equally",
+                  _LEAD_COLUMNS, norm_rows,
+                  emphasis={"Total": "total", _PROGRAMME_GROUPS[-1][1]: "baseline"}),
+            text(
+                "Rates here are the average of the per-day rates rather than one rate over "
+                "the pooled window, so a single large day cannot carry the result. Head "
+                "counts are left blank because an average of rates has no count behind it."
+            ),
+        ]
+
+    blocks.append(text(
+        "Each webinar day below, split by the bots that connected with those leads.",
+        title="PER-WEBINAR DETAIL",
+    ))
+    for day in daily:
+        rows = [_lead_row(r.get("label") or r.get("key") or "", r) for r in day.get("rows", [])]
+        if rows:
+            blocks.append(table(_day_label(day.get("date")), _LEAD_COLUMNS, rows,
+                                emphasis={"Total": "total"}))
+    return blocks

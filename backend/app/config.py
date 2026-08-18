@@ -91,6 +91,9 @@ DEFAULT_METHODOLOGY = {
     "uplift_mode": "weighted",          # weighted (lead-age bands) | simple
     "age_band_edges": [0, 3, 7, 10, 14],  # 0-2, 3-6, 7-9, 10-13, 14+
     "signup_bot_patterns": ["instant confirmation"],
+    # {programme label: substrings that identify its bots by name}. A client
+    # running one webinar leaves this empty and nothing changes.
+    "program_bot_patterns": {},
     "dayof_bot_patterns": ["session today"],
     "cost_bot_scope": "signup_and_dayof",  # signup_and_dayof | all_bots
     "team_email_domains": ["freedomwithai.com", "scalex.club"],

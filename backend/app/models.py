@@ -76,6 +76,10 @@ class Bot(Base, TimestampMixin):
     client_id: Mapped[int] = mapped_column(ForeignKey(fk("clients.id")), index=True)
     name: Mapped[str] = mapped_column(String(200), index=True)
     role: Mapped[str] = mapped_column(String(30), default="other")  # signup | day_of | other
+    # Which webinar this bot works for. A client running two webinars side by
+    # side has a signup and a day-of bot for each, and their talk time must not
+    # be charged to the other one's ROI.
+    program: Mapped[str | None] = mapped_column(String(120), index=True)
     language: Mapped[str | None] = mapped_column(String(40))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 

@@ -267,6 +267,21 @@ def build_workbook(doc: dict, path: str | Path) -> Path:
             RENDERERS.get(block["kind"], _render_text)(sheet, block)
         sheet.finish()
 
+    # A format with no cover whose sections are all unavailable would otherwise
+    # produce a file with no sheets at all, which Excel cannot open. Say what is
+    # missing instead of failing at save time with an openpyxl error.
+    if not wb.worksheets:
+        sheet = Sheet(wb.create_sheet(_sheet_name("Nothing to report", used)), brand)
+        sheet.write(1, "Nothing could be reported for this window", bold=True, size=14,
+                    color=brand.get("negative"))
+        sheet.row += 2
+        for item in doc.get("skipped") or [{"title": "All sections",
+                                            "reason": "no data in this window"}]:
+            sheet.write(1, item.get("title") or "", size=10, bold=True)
+            sheet.write(2, item.get("reason") or "", size=10, color=brand.get("muted"))
+            sheet.row += 1
+        sheet.finish()
+
     if brand.get("footer"):
         for ws in wb.worksheets:
             ws.oddFooter.left.text = brand["footer"]

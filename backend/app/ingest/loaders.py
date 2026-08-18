@@ -57,6 +57,21 @@ def get_or_create_client(db: Session, name: str) -> Client:
     return client
 
 
+def classify_bot_program(bot_name: str, params: dict) -> str | None:
+    """Which webinar a bot belongs to, read off its name.
+
+    A client running two webinars names the bots for them ("Nisha (Sign up)
+    HBL"), which is the only signal tying a bot to a programme. Without it the
+    two webinars would share one talk cost and neither ROI would be right.
+    """
+    lowered = (bot_name or "").lower()
+    for program, patterns in (params.get("program_bot_patterns") or {}).items():
+        for pattern in patterns:
+            if str(pattern).lower() in lowered:
+                return program
+    return None
+
+
 def classify_bot(bot_name: str, params: dict) -> str:
     lowered = (bot_name or "").lower()
     for pattern in params.get("signup_bot_patterns", []):
@@ -87,6 +102,7 @@ class BotCache:
             client_id=self.client_id,
             name=name,
             role=classify_bot(name, self.params),
+            program=classify_bot_program(name, self.params),
             language=guess_language(name),
         )
         self.db.add(bot)
