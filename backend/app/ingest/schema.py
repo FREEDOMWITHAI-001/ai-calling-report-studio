@@ -49,11 +49,20 @@ DATASETS: dict[str, dict] = {
             Field("name", "Name", ["name", "contact name", "full name", "lead name"], True),
             Field("email", "Email", ["email", "email id", "e-mail"]),
             Field("phone", "Phone", ["phone", "number", "mobile", "contact number", "phone number"], True),
-            Field("registered_date", "Registration date", ["date", "registration date", "created at", "reg date", "registered at", "registered on", "registered date", "signup date", "sign up date"], True, "date"),
+            # The date this person is a lead *for* — the webinar they signed up
+            # to attend. A contact-creation date ("date added") is a different
+            # thing and must not win: filing leads under the day their record
+            # was created scatters them across dates no webinar ran on.
+            Field("registered_date", "Webinar / registration date",
+                  ["webinar date", "session date", "masterclass date", "event date",
+                   "registration date", "registered date", "registered at",
+                   "registered on", "signup date", "sign up date", "reg date",
+                   "date", "created at"], True, "date"),
             Field("registered_time", "Registration time", ["time", "registration time"], False, "time"),
-            Field("event_name", "Event / workshop name", ["workshop name", "event", "event name", "webinar"]),
+            Field("event_name", "Event / workshop name",
+                  ["workshop name", "event name", "webinar name", "masterclass"]),
             Field("language", "Language / segment", ["language", "segment", "batch"]),
-            Field("program", "Program", ["program", "product", "course"]),
+            Field("program", "Program / brand", ["brand", "program", "product", "course"]),
             Field("utm_source", "UTM source", ["utm source", "source"]),
             Field("utm_medium", "UTM medium", ["utm medium"]),
             Field("utm_campaign", "UTM campaign", ["utm campaign"]),
