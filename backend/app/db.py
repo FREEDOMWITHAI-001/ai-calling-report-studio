@@ -41,6 +41,28 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
 ]
 
 
+# Constraints that changed after a table already existed. `create_all` never
+# alters an existing table, so each is expressed as a check plus the DDL to run
+# when the check says it is still needed. Postgres only: a SQLite file gets the
+# current definition when its table is first created.
+_ADDED_CONSTRAINTS: list[tuple[str, str, str]] = [
+    # A methodology name used to be unique across every client, which stopped a
+    # second client saving one under a name another client had used.
+    (
+        "SELECT 1 FROM pg_constraint WHERE conname = 'methodology_configs_name_key'",
+        'ALTER TABLE {p}"methodology_configs" '
+        'DROP CONSTRAINT IF EXISTS methodology_configs_name_key',
+        "drop global unique on methodology name",
+    ),
+    (
+        "SELECT 1 FROM pg_indexes WHERE indexname = 'uq_methodology_client_name'",
+        'CREATE UNIQUE INDEX IF NOT EXISTS uq_methodology_client_name '
+        'ON {p}"methodology_configs" (client_id, name)',
+        "add per-client unique on methodology name",
+    ),
+]
+
+
 # Any constant will do; it only has to be the same in every instance so they
 # queue behind each other rather than migrating at the same moment.
 _MIGRATION_LOCK_KEY = 8_274_531
@@ -97,6 +119,29 @@ def _ensure_columns() -> None:
             ))
 
 
+def _ensure_constraints() -> None:
+    """Apply constraint changes, and take no lock when there is nothing to do."""
+    if DATABASE_URL.startswith("sqlite"):
+        return
+    prefix = f'"{DB_SCHEMA}".' if DB_SCHEMA else ""
+    with engine.begin() as conn:
+        wanted = [(ddl, why) for check, ddl, why in _ADDED_CONSTRAINTS
+                  if _needed(conn, check, why)]
+        if not wanted:
+            return
+        conn.execute(text("SELECT pg_advisory_xact_lock(:key)"),
+                     {"key": _MIGRATION_LOCK_KEY})
+        for ddl, _why in wanted:
+            conn.execute(text(ddl.format(p=prefix)))
+
+
+def _needed(conn, check: str, why: str) -> bool:
+    found = conn.execute(text(check)).first() is not None
+    # The first entry drops something that exists; the second creates something
+    # that does not. "drop" is needed while found, "add" while not found.
+    return found if why.startswith("drop") else not found
+
+
 def init_db() -> None:
     """Bring the database up to date. Safe to call from every instance at once.
 
@@ -117,3 +162,4 @@ def init_db() -> None:
     # that are actually absent.
     Base.metadata.create_all(bind=engine, checkfirst=True)
     _ensure_columns()
+    _ensure_constraints()

@@ -341,6 +341,10 @@ class MethodologyConfig(Base, TimestampMixin):
     """
 
     __tablename__ = "methodology_configs"
+    # A name is unique to its client, not globally: two clients may each keep a
+    # "Custom methodology" without one blocking the other.
+    __table_args__ = (UniqueConstraint("client_id", "name", name="uq_methodology_client_name"),)
+
     id: Mapped[int] = mapped_column(primary_key=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey(fk("clients.id")), index=True)
     name: Mapped[str] = mapped_column(String(160))
