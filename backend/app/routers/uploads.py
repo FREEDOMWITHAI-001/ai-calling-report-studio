@@ -14,7 +14,7 @@ from ..config import INGEST_MODE, UPLOAD_DIR
 from ..db import SessionLocal, get_db
 from ..deps import owned, require_client, resolve_client
 from ..ingest import readers
-from ..ingest.loaders import run_ingest
+from ..ingest.loaders import purge_upload_rows, run_ingest
 from ..ingest.schema import (
     dataset_catalog,
     detect_dataset_type,
@@ -179,6 +179,11 @@ def ingest_upload(upload_id: int, body: IngestRequest, background: BackgroundTas
     # There is no client name in the ingest payload to get wrong.
     upload = _owned_upload(db, upload_id, client.id)
 
+    # Re-ingesting the same file replaces what it produced last time. This is
+    # the path taken when a dataset type was detected wrongly, so leaving the
+    # earlier rows in place would keep the mistake and duplicate the fix.
+    purge_upload_rows(db, upload.id)
+
     upload.dataset_type = body.dataset_type
     upload.sheet_name = body.sheet
     upload.mapping = {k: v for k, v in body.mapping.items() if v}
@@ -229,10 +234,13 @@ def get_upload(upload_id: int, client: Client = Depends(require_client),
 def delete_upload(upload_id: int, client: Client = Depends(require_client),
                   db: Session = Depends(get_db)):
     upload = _owned_upload(db, upload_id, client.id)
+    # The rows this file created go with it. Without this the ingested data
+    # outlives the upload row and there is no handle left to remove it by.
+    removed = purge_upload_rows(db, upload.id)
     path = Path(upload.stored_path)
     if path.exists():
         path.unlink()
     storage.delete(db, upload.blob_key, path.suffix)
     db.delete(upload)
     db.commit()
-    return {"deleted": upload_id}
+    return {"deleted": upload_id, "rows_removed": removed}

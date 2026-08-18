@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Alert, Box, Button, Card, CardContent, Chip, FormControl, Grid, InputLabel, LinearProgress,
-  MenuItem, Paper, Select, Stack, Step, StepLabel, Stepper, Table, TableBody, TableCell,
-  TableHead, TableRow, TextField, Typography,
+  Alert, Box, Button, Card, CardContent, Chip, FormControl, Grid, IconButton, InputLabel,
+  LinearProgress, MenuItem, Paper, Select, Stack, Step, StepLabel, Stepper, Table, TableBody,
+  TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
 } from '@mui/material'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
+import TuneIcon from '@mui/icons-material/Tune'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import { api, fmt } from '../api.js'
 import { useApp } from '../state/AppState.jsx'
 import { Pill } from '../components/ui/index.jsx'
@@ -92,6 +94,33 @@ export default function UploadPage() {
       })
       setNotice(`Loading "${upload.filename}" into ${datasetType} for ${client?.name} — watch the log below.`)
       setUpload(null); setPreview(null)
+      refresh()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  // Reopen an already-loaded file at the mapping step. Used when the detected
+  // type was wrong: re-running the ingest replaces the rows it created the
+  // first time, so the correction leaves no trace of the mistake behind.
+  const reclassify = async (row) => {
+    setError(null); setNotice(null)
+    setUpload({ id: row.id, filename: row.filename, size_bytes: row.size_bytes, sheets: [], is_excel: false })
+    setSheet(row.sheet_name || '')
+    await loadPreview(row.id, row.sheet_name || undefined)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const remove = async (row) => {
+    const n = fmt.number(row.inserted_count || 0)
+    if (!window.confirm(`Delete "${row.filename}" and the ${n} rows it loaded into ${row.dataset_type || 'the database'}?
+
+This cannot be undone.`)) return
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const res = await api.deleteUpload(row.id)
+      const detail = Object.entries(res?.rows_removed || {})
+        .map(([table, count]) => `${fmt.number(count)} ${table}`).join(', ')
+      setNotice(`Deleted "${row.filename}"${detail ? ` and its rows (${detail})` : ''}.`)
+      if (upload?.id === row.id) { setUpload(null); setPreview(null) }
       refresh()
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
@@ -257,6 +286,7 @@ export default function UploadPage() {
                 <TableCell align="right">Skipped</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>When</TableCell>
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -273,10 +303,28 @@ export default function UploadPage() {
                       color={row.status === 'success' ? 'success' : row.status === 'failed' ? 'error' : row.status === 'partial' ? 'warning' : 'default'} />
                   </TableCell>
                   <TableCell>{fmt.dateTime(row.uploaded_at)}</TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <Tooltip title="Wrong type or mapping? Reopen and load it again — this replaces the rows it created.">
+                        <span>
+                          <IconButton size="small" disabled={busy} onClick={() => reclassify(row)}>
+                            <TuneIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Delete this file and every row it loaded">
+                        <span>
+                          <IconButton size="small" color="error" disabled={busy} onClick={() => remove(row)}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Stack>
+                  </TableCell>
                 </TableRow>
               ))}
               {!uploads.length && (
-                <TableRow><TableCell colSpan={8}>
+                <TableRow><TableCell colSpan={9}>
                   <Typography variant="body2" color="text.secondary">Nothing uploaded yet.</Typography>
                 </TableCell></TableRow>
               )}

@@ -133,6 +133,29 @@ def _existing_hashes(db: Session, dataset_type: str, client_id: int) -> set:
     return {value for (value,) in db.execute(query).all()}
 
 
+# Every ingested row records the upload it came from, which is what makes an
+# ingest undoable. Ordered so child rows go before anything they point at.
+_INGESTED_MODELS = (Registration, Attendance, Sale, AiCall, WebinarDaily, GenericRecord)
+
+
+def purge_upload_rows(db: Session, upload_id: int) -> dict[str, int]:
+    """Delete every row a given upload produced, and report the damage.
+
+    Used both when an upload is deleted and before it is re-ingested — without
+    it, correcting a mis-detected dataset type would leave the wrong rows
+    behind and add a second, duplicate set alongside them.
+    """
+    removed: dict[str, int] = {}
+    for model in _INGESTED_MODELS:
+        count = db.query(model).filter(model.upload_id == upload_id).delete(
+            synchronize_session=False
+        )
+        if count:
+            removed[model.__tablename__] = count
+    db.commit()
+    return removed
+
+
 def run_ingest(db: Session, upload: RawUpload) -> RawUpload:
     """Stream the stored file into its target table. Updates `upload` in place."""
     mapping = upload.mapping or {}

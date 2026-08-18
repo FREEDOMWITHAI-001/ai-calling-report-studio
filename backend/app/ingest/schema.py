@@ -41,7 +41,7 @@ DATASETS: dict[str, dict] = {
             Field("name", "Name", ["name", "contact name", "full name", "lead name"], True),
             Field("email", "Email", ["email", "email id", "e-mail"]),
             Field("phone", "Phone", ["phone", "number", "mobile", "contact number", "phone number"], True),
-            Field("registered_date", "Registration date", ["date", "registration date", "created at", "reg date"], True, "date"),
+            Field("registered_date", "Registration date", ["date", "registration date", "created at", "reg date", "registered at", "registered on", "registered date", "signup date", "sign up date"], True, "date"),
             Field("registered_time", "Registration time", ["time", "registration time"], False, "time"),
             Field("event_name", "Event / workshop name", ["workshop name", "event", "event name", "webinar"]),
             Field("language", "Language / segment", ["language", "segment", "batch"]),
@@ -209,8 +209,18 @@ def suggest_mapping(dataset_type: str, headers: list[str]) -> dict[str, str | No
 
 def detect_dataset_type(headers: list[str], sheet_name: str | None = None,
                         filename: str | None = None) -> tuple[str, float]:
-    """Score each known dataset type against headers + name hints."""
+    """Score each known dataset type against headers + name hints.
+
+    The second term measures how much of *the file* a type explains, not how
+    much of the type the file fills. Scoring against `len(fields)` handed the
+    win to whichever schema was smallest: a registration export with 9 columns
+    matched name+phone under `attendance` (4 of its 6 fields, 0.67) and lost to
+    its own type (8 of 15 fields, 0.61), despite explaining nearly every column.
+    Dividing by the header count removes that bias — the type that accounts for
+    more of the file wins, regardless of how many fields it declares.
+    """
     hint_text = " ".join(filter(None, [str(sheet_name or ""), str(filename or "")])).lower()
+    header_count = max(1, len([h for h in headers if str(h or "").strip()]))
     best_key, best_score = "custom", 0.0
     for key, cfg in DATASETS.items():
         if key == "custom":
@@ -224,7 +234,7 @@ def detect_dataset_type(headers: list[str], sheet_name: str | None = None,
             score = 0.0
         else:
             score = 0.6 * (matched_required / max(1, len(required))) + 0.4 * (
-                matched_any / max(1, len(fields))
+                min(matched_any, header_count) / header_count
             )
         for hint in cfg["sheet_hints"]:
             if hint in hint_text:
