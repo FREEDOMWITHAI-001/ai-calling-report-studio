@@ -104,16 +104,18 @@ def compute_report(
     def in_scope(bot_name: str | None) -> bool:
         """Which bots count towards 'connected' and towards the talk cost.
 
-        An explicit bot selection always wins; otherwise the signup/day-of bots
-        are used, and when the report is scoped to one language the bots of
-        other languages are excluded (a Hindi bot's calls are not this
-        cohort's cost).
+        An explicit bot selection replaces the signup/day-of filter, but only
+        that filter: a chosen bot still has to belong to this report's language
+        and programme. Letting a selection bypass those turned "show me these
+        bots" into "charge every webinar for all of them", which is not what
+        picking a bot from a list means.
         """
         if not bot_name:
             return False
         if selected_bots:
-            return bot_name in selected_bots
-        if roles.get(bot_name, "other") not in ("signup", "day_of"):
+            if bot_name not in selected_bots:
+                return False
+        elif roles.get(bot_name, "other") not in ("signup", "day_of"):
             return False
         if lock_language:
             bot_language = bot_languages.get(bot_name)
