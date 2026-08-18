@@ -136,9 +136,12 @@ export const api = {
   uploadStatus: (id) => request(scoped(`/uploads/${id}`)),
   deleteUpload: (id) => request(scoped(`/uploads/${id}`), { method: 'DELETE' }),
 
-  methodologies: () => request('/methodologies'),
+  // Scoped: a methodology belongs to a client, so listing or saving one
+  // without saying which client is meaningless.
+  methodologies: () => request(scoped('/methodologies')),
   methodologyDefaults: () => request('/methodologies/defaults'),
-  saveMethodology: (body) => request('/methodologies', { method: 'POST', body: JSON.stringify(body) }),
+  saveMethodology: (body) =>
+    request(scoped('/methodologies'), { method: 'POST', body: JSON.stringify(body) }),
 
   // Report formats — a client's own layouts, plus the built-ins as fallbacks.
   formats: () => request(scoped('/report-formats')),

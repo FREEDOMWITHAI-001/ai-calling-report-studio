@@ -179,8 +179,11 @@ def create_methodology(body: MethodologyIn, client: Client = Depends(require_cli
 
 
 @router.delete("/methodologies/{config_id}")
-def delete_methodology(config_id: int, db: Session = Depends(get_db)):
+def delete_methodology(config_id: int, client: Client = Depends(require_client),
+                       db: Session = Depends(get_db)):
     config = db.get(MethodologyConfig, config_id)
+    if config is not None and config.client_id not in (None, client.id):
+        raise HTTPException(404, "Methodology not found")
     if not config:
         raise HTTPException(404, "Not found")
     db.delete(config)
