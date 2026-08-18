@@ -12,6 +12,14 @@ import re
 from ..util.normalize import norm_name
 
 
+# `program` on attendance and sales is deliberately given no synonyms. Auto-
+# mapping it grabbed whatever column looked programme-ish — a Zoom "Topic", a
+# sales "registered for webinar" — and tagged every row with a value that does
+# not equal the label the registrations use. The report then scoped to "HBL",
+# matched nothing, and reported zero show-ups and zero buyers as though they
+# were findings. It is set from the upload's Program field, or mapped by hand.
+
+
 class Field:
     def __init__(self, key: str, label: str, synonyms: list[str], required: bool = False,
                  kind: str = "text"):
@@ -98,7 +106,7 @@ DATASETS: dict[str, dict] = {
             Field("payment_id", "Payment ID", ["payment id", "transaction id", "order id"]),
             Field("payment_status", "Payment status", ["payment status full l1", "status", "payment status"]),
             Field("product", "Product", ["product", "course", "offer"]),
-            Field("program", "Webinar / programme", ["program", "webinar", "topic", "batch name"]),
+            Field("program", "Webinar / programme", []),  # never auto-mapped: see below
             Field("payment_type", "Payment type", ["payment type", "type"]),
             Field("language", "Language / segment", ["language", "segment"]),
         ],
@@ -116,7 +124,7 @@ DATASETS: dict[str, dict] = {
             # resolve the person, which is what the loader actually enforces.
             Field("phone", "Phone", ["number", "phone", "mobile"]),
             Field("attended_on", "Attended on", ["date", "date of workshop", "workshop date", "join time", "attended on", "attendance date", "attended date", "attended"], True, "date"),
-            Field("program", "Webinar / programme", ["program", "webinar", "topic", "batch name"]),
+            Field("program", "Webinar / programme", []),  # never auto-mapped: see below
             Field("minutes_in_session", "Minutes in session", ["time", "time in session", "duration", "minutes"], False, "number"),
             Field("language", "Language / segment", ["language", "segment"]),
         ],

@@ -1203,6 +1203,40 @@ def _no_bots_warning(result: dict) -> list[Block]:
     )]
 
 
+def _scope_warnings(cohort: Cohort, result: dict) -> list[Block]:
+    """Flag a report whose filters matched nothing, before its zeros are read.
+
+    Grouping by webinar narrows attendance and sales to rows tagged with that
+    webinar. If they were tagged with something else — a Zoom topic, a product
+    name — the filter is satisfied by no row at all and every rate comes out
+    zero. That is indistinguishable from "the calling did nothing" unless the
+    report says which filter emptied it.
+    """
+    blocks = _no_bots_warning(result)
+    groups = result.get("groups") or {}
+    total = groups.get("total") or {}
+    leads = total.get("registrants") or 0
+    if not leads:
+        return blocks
+
+    program = getattr(cohort, "program", None)
+    missing = []
+    if not (total.get("showed") or 0):
+        missing.append("show-ups")
+    if not (total.get("buyers") or 0):
+        missing.append("buyers")
+    if missing and program:
+        blocks.append(text(
+            f"{leads:,} leads were found for {program}, but no {' and no '.join(missing)}. "
+            f"Attendance and sales are matched to a webinar by their own Programme tag, so a "
+            f"row tagged anything other than \"{program}\" — a Zoom topic, a product name — is "
+            f"excluded. Re-open those uploads and set Programme to \"{program}\", or clear the "
+            "mapped Programme column so every row is matched by person instead.",
+            title="CHECK THIS FIRST",
+        ))
+    return blocks
+
+
 @section("coacheasily_report", "CBA X report",
          ("registrations", "ai_calls", "attendance", "sales"),
          "CoachEasily per-programme report: impact, show-up by bot, and each call day.")
@@ -1386,7 +1420,7 @@ def _programme_report(cohort: Cohort, config: dict) -> list[Block]:
     head, groups, calls = result["headline"], result["groups"], result["calls"]
     daily = result.get("daily", [])
 
-    blocks: list[Block] = _no_bots_warning(result) + [
+    blocks: list[Block] = _scope_warnings(cohort, result) + [
         kpi("BUSINESS IMPACT — with AI vs without", [
             Item("Revenue without AI calling", head.get("revenue_without_ai"), "money"),
             Item("Revenue with AI calling", head.get("revenue_with_ai"), "money"),
