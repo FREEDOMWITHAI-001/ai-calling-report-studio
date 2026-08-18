@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import storage
 from ..config import DEFAULT_METHODOLOGY
 from ..models import (
     AiCall,
@@ -173,7 +175,10 @@ def run_ingest(db: Session, upload: RawUpload) -> RawUpload:
     if dataset_type == "custom":
         generic_ds = _get_generic_dataset(db, client.id, upload, options)
 
-    headers, rows = read_table(upload.stored_path, upload.sheet_name)
+    source = storage.local_path(
+        db, upload.blob_key, upload.stored_path, Path(upload.stored_path).suffix
+    )
+    headers, rows = read_table(source, upload.sheet_name)
     total = inserted = skipped = 0
     batch: list[tuple[object, object]] = []
 

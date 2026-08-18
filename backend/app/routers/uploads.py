@@ -9,7 +9,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import UPLOAD_DIR
+from .. import storage
+from ..config import INGEST_MODE, UPLOAD_DIR
 from ..db import SessionLocal, get_db
 from ..deps import owned, require_client, resolve_client
 from ..ingest import readers
@@ -29,6 +30,16 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 def _owned_upload(db: Session, upload_id: int, client_id: int) -> RawUpload:
     """A file belongs to the client it was uploaded for, from the moment it lands."""
     return owned(db.get(RawUpload, upload_id), client_id, "Upload")
+
+
+def _source(db: Session, upload: RawUpload) -> Path:
+    """A readable path for an upload, restored from the blob if the disk is cold."""
+    try:
+        return storage.local_path(
+            db, upload.blob_key, upload.stored_path, Path(upload.stored_path).suffix
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(410, str(exc))
 
 
 @router.get("/datasets")
@@ -65,9 +76,20 @@ async def create_upload(
     with stored.open("wb") as out:
         shutil.copyfileobj(file.file, out)
 
+    # Disk alone is not durable on a serverless host, so the bytes are also kept
+    # in the database and every later read goes through storage.local_path.
+    try:
+        blob_key = storage.put(
+            db, stored.read_bytes(), file.filename or stored.name, file.content_type
+        )
+    except ValueError as exc:
+        stored.unlink(missing_ok=True)
+        raise HTTPException(413, str(exc))
+
     upload = RawUpload(
         filename=file.filename or stored.name,
         stored_path=str(stored),
+        blob_key=blob_key,
         content_type=file.content_type,
         size_bytes=stored.stat().st_size,
         client_id=client.id,
@@ -101,7 +123,7 @@ def preview_upload(upload_id: int, sheet: str | None = None, limit: int = 15,
                    client: Client = Depends(require_client), db: Session = Depends(get_db)):
     upload = _owned_upload(db, upload_id, client.id)
     try:
-        data = readers.preview(upload.stored_path, sheet, limit)
+        data = readers.preview(_source(db, upload), sheet, limit)
     except Exception as exc:
         raise HTTPException(400, f"Could not preview: {exc}")
 
@@ -177,7 +199,7 @@ def ingest_upload(upload_id: int, body: IngestRequest, background: BackgroundTas
     if body.save_template_as:
         headers = list({v for v in upload.mapping.values() if v})
         signature = header_signature(
-            readers.preview(upload.stored_path, body.sheet, 1)["columns"]
+            readers.preview(_source(db, upload), body.sheet, 1)["columns"]
         )
         template = MappingTemplate(
             name=body.save_template_as,
@@ -189,7 +211,11 @@ def ingest_upload(upload_id: int, body: IngestRequest, background: BackgroundTas
         db.add(template)
         db.commit()
 
-    background.add_task(_ingest_task, upload.id)
+    if INGEST_MODE == "inline":
+        _ingest_task(upload.id)
+        db.refresh(upload)
+    else:
+        background.add_task(_ingest_task, upload.id)
     return upload
 
 
@@ -206,6 +232,7 @@ def delete_upload(upload_id: int, client: Client = Depends(require_client),
     path = Path(upload.stored_path)
     if path.exists():
         path.unlink()
+    storage.delete(db, upload.blob_key, path.suffix)
     db.delete(upload)
     db.commit()
     return {"deleted": upload_id}

@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import storage
 from ..config import REPORT_DIR
 from ..db import SessionLocal, get_db
 from ..deps import owned, require_client, resolve_client
@@ -164,10 +165,14 @@ def _generate(run_id: int) -> None:
             filename = f"{safe or 'report'}_{run.date_from}_{run.date_to}_{stamp}{EXTENSIONS[fmt]}"
             target = Path(REPORT_DIR) / filename
             builder(result, target)
+            # The rendered file is kept in the database so the download works
+            # from any instance, not just the one that happened to build it.
+            blob_key = storage.put(db, target.read_bytes(), filename, MEDIA.get(fmt))
             files.append({
                 "format": fmt,
                 "filename": filename,
                 "path": str(target),
+                "blob_key": blob_key,
                 "size_bytes": target.stat().st_size,
             })
 
@@ -294,9 +299,12 @@ def download_report(run_id: int, fmt: str, client: Client = Depends(require_clie
         raise HTTPException(404, "Report file not found")
     for item in run.files:
         if item["format"] == fmt:
-            path = Path(item["path"])
-            if not path.exists():
-                raise HTTPException(410, "File was removed from disk")
+            try:
+                path = storage.local_path(
+                    db, item.get("blob_key"), item.get("path"), EXTENSIONS[fmt]
+                )
+            except FileNotFoundError:
+                raise HTTPException(410, "File is no longer available")
             return FileResponse(path, media_type=MEDIA[fmt], filename=item["filename"])
     raise HTTPException(404, f"No '{fmt}' output for this report")
 
@@ -309,6 +317,7 @@ def delete_report(run_id: int, client: Client = Depends(require_client),
         path = Path(item["path"])
         if path.exists():
             path.unlink()
+        storage.delete(db, item.get("blob_key"), EXTENSIONS.get(item["format"], ""))
     db.delete(run)
     db.commit()
     return {"deleted": run_id}

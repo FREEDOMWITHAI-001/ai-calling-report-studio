@@ -7,16 +7,12 @@ to a local SQLite file so it runs with zero infrastructure setup on Windows.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent          # backend/
 PROJECT_DIR = BASE_DIR.parent                              # project root
-DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
-UPLOAD_DIR = DATA_DIR / "uploads"
-REPORT_DIR = DATA_DIR / "reports"
 
-for _d in (DATA_DIR, UPLOAD_DIR, REPORT_DIR):
-    _d.mkdir(parents=True, exist_ok=True)
 
 def _load_env_file() -> None:
     """Minimal .env loader so no extra dependency is needed."""
@@ -31,12 +27,49 @@ def _load_env_file() -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+# Loaded before anything reads the environment, so DATA_DIR and DATABASE_URL in
+# a local .env are honoured. Real environment variables still win.
 _load_env_file()
+
+
+def _writable_data_dir() -> Path:
+    """Pick a directory we can actually write to.
+
+    On a normal machine this is backend/data. On a serverless host (Vercel,
+    Lambda) the deployment is read-only and only the system temp dir accepts
+    writes, so fall back there instead of dying at import time. Nothing here is
+    the source of truth either way — durable bytes live in the database via
+    `app.storage`; these directories are only a scratch/cache area.
+    """
+    for candidate in (Path(os.getenv("DATA_DIR", BASE_DIR / "data")),
+                      Path(tempfile.gettempdir()) / "report-studio"):
+        try:
+            for sub in (candidate, candidate / "uploads", candidate / "reports"):
+                sub.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write-test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return candidate
+        except OSError:
+            continue
+    raise RuntimeError("No writable data directory available")
+
+
+DATA_DIR = _writable_data_dir()
+UPLOAD_DIR = DATA_DIR / "uploads"
+REPORT_DIR = DATA_DIR / "reports"
 
 DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
 # Postgres only: keep this app's tables in their own schema so a shared dev
 # database stays uncluttered.
 DB_SCHEMA = os.getenv("DB_SCHEMA", "ai_report") if DATABASE_URL.startswith("postgres") else None
+
+# Serverless instances are frozen the moment a response is sent, so work queued
+# with BackgroundTasks may never run. On such a host the ingest is done inline
+# instead — slower to respond, but it actually finishes. Override with
+# INGEST_MODE=background|inline.
+_default_ingest = "inline" if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") else "background"
+INGEST_MODE = os.getenv("INGEST_MODE", _default_ingest).strip().lower()
 
 APP_NAME = "CoachEasily Report Studio"
 CURRENCY = "₹"

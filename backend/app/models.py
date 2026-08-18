@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -247,11 +248,31 @@ class GenericRecord(Base):
 # --------------------------------------------------------------------------- #
 # Operational tables
 # --------------------------------------------------------------------------- #
+class FileBlob(Base):
+    """Durable bytes for an uploaded or generated file.
+
+    The filesystem is a cache, not the record. On a serverless host every
+    request may land on a fresh instance with an empty disk, so anything that
+    must outlive a single request is kept here and materialized back to a local
+    path on demand (see `app.storage`).
+    """
+
+    __tablename__ = "file_blobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    filename: Mapped[str] = mapped_column(String(400))
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class RawUpload(Base):
     __tablename__ = "raw_uploads"
     id: Mapped[int] = mapped_column(primary_key=True)
     filename: Mapped[str] = mapped_column(String(400))
     stored_path: Mapped[str] = mapped_column(Text)
+    blob_key: Mapped[str | None] = mapped_column(String(64), index=True)
     content_type: Mapped[str | None] = mapped_column(String(120))
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     sheet_name: Mapped[str | None] = mapped_column(String(200))
