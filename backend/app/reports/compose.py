@@ -48,6 +48,9 @@ def compose(
     if not isinstance(template, Template):
         template = get_template(template)
 
+    # The format's own methodology, with anything explicitly passed on top.
+    params = {**template.params, **(params or {})}
+
     cohort = Cohort(
         db, client_id=client_id, date_from=date_from, date_to=date_to,
         params=params, language=language, program=program,

@@ -43,8 +43,13 @@ def _resolve_client(db: Session, client_id: int | None) -> Client:
     return resolve_client(db, client_id)
 
 
-def _resolve_params(db: Session, body: ReportRequest) -> dict:
+def _resolve_params(db: Session, body: ReportRequest, client_id: int | None = None) -> dict:
+    """Methodology for this run: format defaults, then the saved config, then
+    whatever the caller overrode. The format is lowest so a client that has
+    settled a question keeps its answer."""
     params: dict = {}
+    if client_id is not None and body.use_template:
+        params.update(resolve_for_client(db, client_id, body.template).params or {})
     config = None
     if body.methodology_id:
         config = db.get(MethodologyConfig, body.methodology_id)
@@ -103,7 +108,7 @@ def preview_report(body: ReportRequest, db: Session = Depends(get_db)):
         client_id=client.id,
         date_from=body.date_from,
         date_to=body.date_to,
-        params=_resolve_params(db, body),
+        params=_resolve_params(db, body, client.id),
         language=body.language,
         program=body.program,
         bot_names=body.bot_names,
@@ -226,7 +231,7 @@ def _create_run(db: Session, body: ReportRequest) -> ReportRun:
             "program": body.program,
             "product": body.product,
             "bot_names": body.bot_names,
-            "params": _resolve_params(db, body),
+            "params": _resolve_params(db, body, client.id),
         },
         status="queued",
     )
