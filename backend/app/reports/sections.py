@@ -1177,6 +1177,32 @@ def _method_items(cohort: Cohort, result: dict) -> list[Item]:
     ]
 
 
+def _no_bots_warning(result: dict) -> list[Block]:
+    """Say so when no bot counted, instead of reporting a confident zero.
+
+    If nothing is classified as a signup or day-of bot, every group is empty,
+    the cost is zero and the ROI is blank — a report that looks calculated but
+    describes nothing. The usual cause is bots left on the default role, which
+    is invisible unless the report says it out loud.
+    """
+    groups = result.get("groups") or {}
+    connected = (groups.get("connected") or {}).get("registrants") or 0
+    if connected or (result.get("calls") or {}).get("talk_cost"):
+        return []
+    seen = (result.get("calls") or {}).get("bots_in_window") or {}
+    detail = (f"{len(seen)} bot(s) placed calls in this window: "
+              + ", ".join(list(seen)[:6]) + "." if seen
+              else "No bot calls were found in this window at all.")
+    return [text(
+        "NO BOT COUNTED — every figure below is zero because no call was in "
+        f"scope. {detail} A call only counts when its bot is set to Signup or "
+        "Day-of in Settings > Bot roles; bots left on Other are excluded from "
+        "both the connected groups and the cost. This is not a finding about "
+        "the calling; it means the report could not see it.",
+        title="CHECK THIS FIRST",
+    )]
+
+
 @section("coacheasily_report", "CBA X report",
          ("registrations", "ai_calls", "attendance", "sales"),
          "CoachEasily per-programme report: impact, show-up by bot, and each call day.")
@@ -1186,7 +1212,7 @@ def _coacheasily_report(cohort: Cohort, config: dict) -> list[Block]:
     groups = result["groups"]
     calls = result["calls"]
 
-    blocks: list[Block] = [
+    blocks: list[Block] = _no_bots_warning(result) + [
         kpi("BUSINESS IMPACT — with AI vs without", [
             Item("Revenue without AI calling", head.get("revenue_without_ai"), "money"),
             Item("Revenue with AI calling", head.get("revenue_with_ai"), "money"),
@@ -1360,7 +1386,7 @@ def _programme_report(cohort: Cohort, config: dict) -> list[Block]:
     head, groups, calls = result["headline"], result["groups"], result["calls"]
     daily = result.get("daily", [])
 
-    blocks: list[Block] = [
+    blocks: list[Block] = _no_bots_warning(result) + [
         kpi("BUSINESS IMPACT — with AI vs without", [
             Item("Revenue without AI calling", head.get("revenue_without_ai"), "money"),
             Item("Revenue with AI calling", head.get("revenue_with_ai"), "money"),
