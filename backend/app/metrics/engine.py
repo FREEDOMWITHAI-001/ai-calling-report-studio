@@ -44,6 +44,18 @@ def _merge_params(params: dict | None) -> dict:
     return merged
 
 
+def _has_program(db: Session, model, client_id: int) -> bool:
+    """Has this client actually tagged rows of this kind with a webinar?
+
+    Scoping only switches on once the data can support it, so a client running
+    one webinar — where nothing is tagged — keeps exactly the numbers it had.
+    """
+    return db.execute(
+        select(model.id).where(model.client_id == client_id,
+                               model.program.is_not(None)).limit(1)
+    ).first() is not None
+
+
 def _bot_maps(db: Session, client_id: int, params: dict):
     roles: dict[str, str] = {}
     languages: dict[str, str | None] = {}
@@ -248,6 +260,8 @@ def compute_report(
     )
     if language:
         att_q = att_q.where(Attendance.language == language)
+    if program and _has_program(db, Attendance, client_id):
+        att_q = att_q.where(Attendance.program == program)
     showed: set[int] = set()
     for person_id, attended_on in db.execute(att_q).all():
         if person_id not in cohort or attended_on is None:
@@ -265,6 +279,8 @@ def compute_report(
     )
     if product:
         sale_q = sale_q.where(Sale.product == product)
+    if program and _has_program(db, Sale, client_id):
+        sale_q = sale_q.where(Sale.program == program)
     buyers: set[int] = set()
     sale_rows_in_window = 0
     sale_rows_outside_cohort = 0

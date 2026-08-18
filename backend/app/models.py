@@ -177,7 +177,10 @@ class Sale(Base, TimestampMixin):
     amount: Mapped[float] = mapped_column(Float, default=0.0)
     sold_at: Mapped[datetime | None] = mapped_column(DateTime)
     sale_date: Mapped[date | None] = mapped_column(Date, index=True)
-    product: Mapped[str | None] = mapped_column(String(120), index=True)   # e.g. "L1 English"
+    product: Mapped[str | None] = mapped_column(String(120), index=True)
+    # As on attendance: which webinar the sale belongs to, so a buyer who
+    # registered for two is credited to one.
+    program: Mapped[str | None] = mapped_column(String(80), index=True)   # e.g. "L1 English"
     payment_type: Mapped[str | None] = mapped_column(String(40))           # full | lock | balance
     payment_id: Mapped[str | None] = mapped_column(String(120))
     payment_status: Mapped[str | None] = mapped_column(String(60))
@@ -201,6 +204,9 @@ class Attendance(Base, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(40))
     phone_norm: Mapped[str | None] = mapped_column(String(20), index=True)
     attended_on: Mapped[date | None] = mapped_column(Date, index=True)
+    # Which webinar this attendance belongs to. Without it, a person signed up
+    # for two webinars is counted as having shown up for both.
+    program: Mapped[str | None] = mapped_column(String(80), index=True)
     minutes_in_session: Mapped[float | None] = mapped_column(Float)
     language: Mapped[str | None] = mapped_column(String(40), index=True)
     row_hash: Mapped[str | None] = mapped_column(String(32), index=True)
