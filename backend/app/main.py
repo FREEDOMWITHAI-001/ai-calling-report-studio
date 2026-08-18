@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+import logging
+import traceback
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import APP_NAME, BASE_DIR, DATABASE_URL, DB_SCHEMA
@@ -24,6 +27,29 @@ app.include_router(uploads.router)
 app.include_router(data.router)
 app.include_router(reports.router)
 app.include_router(formats.router)
+
+
+log = logging.getLogger("report-studio")
+
+
+@app.exception_handler(Exception)
+async def unhandled(request: Request, exc: Exception) -> JSONResponse:
+    """Say what actually broke.
+
+    An unhandled error reached the browser as a bare "500 Request failed",
+    which is unactionable for whoever hits it and for whoever is asked to fix
+    it. This is an internal tool with no public surface, so the exception type
+    and message are worth far more in the response than they cost.
+    """
+    log.exception("unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"{type(exc).__name__}: {exc}",
+            "where": f"{request.method} {request.url.path}",
+            "traceback": traceback.format_exc()[-1500:],
+        },
+    )
 
 
 @app.on_event("startup")
