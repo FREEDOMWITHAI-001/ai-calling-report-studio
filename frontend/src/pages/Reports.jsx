@@ -310,6 +310,52 @@ export default function ReportsPage() {
             </Grid>
           </Grid>
 
+          {/* A format that renders a sheet per webinar previews that way too,
+              so the split is visible before anything is exported. */}
+          {result.by_program?.length > 1 && (
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>Each webinar on its own</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Every webinar is costed against its own bots, so each ROI is that webinar&apos;s alone.
+                  The combined figures above belong to no single one.
+                </Typography>
+                <Box sx={{ mt: 2, overflowX: 'auto' }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Webinar</TableCell>
+                        <TableCell align="right">Leads</TableCell>
+                        <TableCell align="right">Showed</TableCell>
+                        <TableCell align="right">Show-up %</TableCell>
+                        <TableCell align="right">Buyers</TableCell>
+                        <TableCell align="right">Revenue added</TableCell>
+                        <TableCell align="right">Cost</TableCell>
+                        <TableCell align="right">ROI</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {result.by_program.map((p) => (
+                        <TableRow key={p.program}>
+                          <TableCell sx={{ fontWeight: 600 }}>{p.program}</TableCell>
+                          <TableCell align="right">{fmt.number(p.total?.registrants)}</TableCell>
+                          <TableCell align="right">{fmt.number(p.total?.showed)}</TableCell>
+                          <TableCell align="right">{fmt.pct(p.total?.show_rate)}</TableCell>
+                          <TableCell align="right">{fmt.number(p.headline?.buyers)}</TableCell>
+                          <TableCell align="right">{fmt.money(p.headline?.revenue_added)}</TableCell>
+                          <TableCell align="right">{fmt.money(p.headline?.talk_cost)}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            {fmt.multiple(p.headline?.roi)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Show-up &amp; buyers by bot reached</Typography>

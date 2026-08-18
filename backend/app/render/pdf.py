@@ -20,6 +20,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from ..config import APP_NAME
 from . import style as S
 
 PAGE = landscape(A4)
@@ -164,10 +165,15 @@ def build_pdf(result: dict, path: str | Path) -> Path:
     doc = SimpleDocTemplate(
         str(path), pagesize=PAGE,
         leftMargin=17 * mm, rightMargin=17 * mm, topMargin=14 * mm, bottomMargin=14 * mm,
-        title=f"CoachEasily — {meta['title']}", author="CoachEasily Report Studio",
+        # The client this report is for, not whichever client the app was first
+        # written for. A DVA report used to be authored "CoachEasily".
+        title=meta.get("title") or "AI calling report",
+        author=meta.get("client") or APP_NAME,
     )
     story = [
-        Paragraph(f"COACHEASILY — WHAT AI CALLING ADDED&nbsp;&nbsp;({meta['title']})", st["title"]),
+        Paragraph(
+            f"{(meta.get('client') or 'AI CALLING').upper()} — WHAT AI CALLING ADDED"
+            f"&nbsp;&nbsp;({meta['title']})", st["title"]),
         Paragraph(S.subtitle_line(result), st["subtitle"]),
         _kpi_row(result, st),
         Spacer(1, 8),

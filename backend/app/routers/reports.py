@@ -20,6 +20,7 @@ from ..render.pdf import build_pdf
 from ..render.pptx_deck import build_pptx
 from ..render.workbook import build_workbook
 from ..reports import compose, describe_all, resolve_for_client
+from ..reports.compose import _programmes
 from ..schemas import BatchReportRequest, ReportOut, ReportRequest
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -114,18 +115,30 @@ def compose_report(body: ReportRequest, db: Session = Depends(get_db)):
 def preview_report(body: ReportRequest, db: Session = Depends(get_db)):
     """Compute the numbers without writing any files (drives the dashboard)."""
     client = _resolve_client(db, body.client_id)
-    return compute_report(
-        db,
-        client_id=client.id,
-        date_from=body.date_from,
-        date_to=body.date_to,
-        params=_resolve_params(db, body, client.id),
-        language=body.language,
-        program=body.program,
-        bot_names=body.bot_names,
-        product=body.product,
-        title=_default_title(client, body),
-    )
+    params = _resolve_params(db, body, client.id)
+    shared = dict(db=db, client_id=client.id, date_from=body.date_from, date_to=body.date_to,
+                  params=params, language=body.language, bot_names=body.bot_names,
+                  product=body.product)
+    result = compute_report(program=body.program, title=_default_title(client, body), **shared)
+
+    # A format that renders a sheet per webinar should preview that way too.
+    # Otherwise the only place the split exists is the downloaded file, and the
+    # figures on screen belong to no single webinar.
+    template = resolve_for_client(db, client.id, body.template) if body.use_template else None
+    if template and template.group_by == "program" and not body.program:
+        result["by_program"] = [
+            {
+                "program": name,
+                "headline": part["headline"],
+                "total": part["groups"].get("total"),
+                "groups": part["groups"],
+            }
+            for name, part in (
+                (n, compute_report(program=n, title=n, **shared))
+                for n in _programmes(db, client.id, body.date_from, body.date_to, body.language)
+            )
+        ]
+    return result
 
 
 def _generate(run_id: int) -> None:

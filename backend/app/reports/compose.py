@@ -84,7 +84,14 @@ def compose(
         for ref in template.sections:
             config = dict(ref.config)
             if ref.title:
-                config["title"] = ref.title
+                # A title may name the thing it describes: "{program} report"
+                # becomes "CBA X report" or "HBL report" from the data, instead
+                # of one client's programme being frozen into the layout.
+                config["title"] = ref.title.format(
+                    program=program or client_name or "Programme",
+                    client=client_name or "Client",
+                    language=language or "",
+                ).strip()
             built.append(section_lib.build_section(ref.key, cohort, config).to_dict())
 
     skipped = [s for s in built if not s["available"]]

@@ -186,7 +186,7 @@ COACHEASILY_GENERAL = Template(
     ),
     sections=[
         SectionRef("coacheasily_overview", title="Overview"),
-        SectionRef("coacheasily_report", title="CBA X report"),
+        SectionRef("coacheasily_report", title="{program} report"),
     ],
 )
 

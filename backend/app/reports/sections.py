@@ -1237,7 +1237,7 @@ def _scope_warnings(cohort: Cohort, result: dict) -> list[Block]:
     return blocks
 
 
-@section("coacheasily_report", "CBA X report",
+@section("coacheasily_report", "Programme report",
          ("registrations", "ai_calls", "attendance", "sales"),
          "CoachEasily per-programme report: impact, show-up by bot, and each call day.")
 def _coacheasily_report(cohort: Cohort, config: dict) -> list[Block]:
