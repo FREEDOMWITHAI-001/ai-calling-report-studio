@@ -66,13 +66,16 @@ export default function UploadPage() {
     } catch (e) { setError(e.message) } finally { setBusy(false); setProgress(null) }
   }
 
-  const loadPreview = async (id, sheetName) => {
+  const loadPreview = async (id, sheetName, forceType) => {
     setBusy(true)
     try {
       const data = await api.preview(id, sheetName)
       setPreview(data)
-      setDatasetType(data.suggested_type)
-      setMapping(data.suggested_mapping || {})
+      // Re-opening keeps the type it was loaded as; a fresh file takes the
+      // detected one.
+      const type = forceType || data.suggested_type
+      setDatasetType(type)
+      setMapping((forceType && data.mapping_options?.[forceType]) || data.suggested_mapping || {})
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
@@ -106,7 +109,15 @@ export default function UploadPage() {
     setError(null); setNotice(null)
     setUpload({ id: row.id, filename: row.filename, size_bytes: row.size_bytes, sheets: [], is_excel: false })
     setSheet(row.sheet_name || '')
-    await loadPreview(row.id, row.sheet_name || undefined)
+    // Restore what this file was loaded with, so re-running it keeps the
+    // language and programme unless they are deliberately changed.
+    const prev = row.options || {}
+    setOptions({
+      language: prev.language || '',
+      program: prev.program || '',
+      product: prev.product || '',
+    })
+    await loadPreview(row.id, row.sheet_name || undefined, row.dataset_type)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 

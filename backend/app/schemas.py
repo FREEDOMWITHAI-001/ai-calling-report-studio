@@ -37,6 +37,11 @@ class UploadOut(BaseModel):
     uploaded_at: datetime | None = None
     finished_at: datetime | None = None
     size_bytes: int | None = None
+    # Returned so re-opening an upload can restore the choices it was loaded
+    # with. Without them a re-ingest silently drops the language and programme
+    # the first run was given.
+    mapping: dict | None = None
+    options: dict | None = None
 
     class Config:
         from_attributes = True
