@@ -109,10 +109,13 @@ DATASETS: dict[str, dict] = {
         "description": "Who actually showed up, one row per attendance record.",
         "sheet_hints": ["number fetch", "attendee", "attendance", "zoom"],
         "fields": [
-            Field("name", "Name", ["name", "attendee name"], True),
+            Field("name", "Name", ["name", "attendee name", "name (original name)"], True),
             Field("email", "Email", ["email", "email id"]),
-            Field("phone", "Phone", ["number", "phone", "mobile"], True),
-            Field("attended_on", "Attended on", ["date", "date of workshop", "workshop date"], True, "date"),
+            # Not required: Zoom exports identify an attendee by name and email
+            # and carry no phone at all. One of name/email/phone is enough to
+            # resolve the person, which is what the loader actually enforces.
+            Field("phone", "Phone", ["number", "phone", "mobile"]),
+            Field("attended_on", "Attended on", ["date", "date of workshop", "workshop date", "join time", "attended on", "attendance date", "attended date", "attended"], True, "date"),
             Field("program", "Webinar / programme", ["program", "webinar", "topic", "batch name"]),
             Field("minutes_in_session", "Minutes in session", ["time", "time in session", "duration", "minutes"], False, "number"),
             Field("language", "Language / segment", ["language", "segment"]),
